@@ -8,15 +8,13 @@ use hickory_proto::{
 use log::*;
 use tokio::{net::UdpSocket, select};
 
-// mod dns;
-mod ip4set;
-// use dns::Message;
-use ip4set::Ip4Set;
+mod ipset;
+use ipset::IpSet;
 
 struct Upstream {
 	name: String,
 	// resolver: AsyncResolver<GenericConnector<TokioRuntimeProvider>>,
-	ip4set: Option<Ip4Set>,
+	ipset: Option<IpSet>,
 }
 
 struct Diverge(Vec<Upstream>);
