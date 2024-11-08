@@ -59,7 +59,7 @@ so certain features are omitted:
 	* no cache.
 	* listens on TCP only.
 * this is a port of [a previous project](https://github.com/Jimmy-Z/diverge) to Rust,
-some features are dropped/different from the Go version:
+some features are different/dropped:
 	* AAAA is IP set based too, instead of based on A decision.
 	* (dropped) decision cache (with redis dependency).
 	* (dropped) QTYPE other than A/AAAA/PTR.
@@ -67,7 +67,8 @@ some features are dropped/different from the Go version:
 
 to do
 ---
+* sane log level
 * maybe ditch `hickory_resolver`
 	* since it doesn't support `hickory_proto::op::Message` anyway
-* sane log level
-* TXT?
+* maybe ditch `hickory_proto` too
+* TXT support?
