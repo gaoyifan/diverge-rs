@@ -15,8 +15,7 @@ impl IpSet {
 		Self(BTreeMap::new(), BTreeMap::new())
 	}
 
-	pub fn from(filename: &str) -> Self {
-		let mut s = Self::new();
+	pub fn from(&mut self, filename: &str) {
 		for line in std::fs::read_to_string(filename).unwrap().lines() {
 			let line = line.trim();
 			if line.is_empty() || line.starts_with('#') {
@@ -25,9 +24,8 @@ impl IpSet {
 			let (addr, len) = line.split_once('/').unwrap();
 			let addr: IpAddr = addr.parse().unwrap();
 			let len: usize = len.parse().unwrap();
-			s.insert(addr, len);
+			self.insert(addr, len);
 		}
-		s
 	}
 
 	pub fn insert(&mut self, addr: IpAddr, cidr_len: usize) {

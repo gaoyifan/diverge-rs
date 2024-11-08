@@ -1,93 +1,112 @@
-use std::net::SocketAddr;
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
-// use deku::prelude::*;
-use hickory_proto::{
-	op::{Message, Query},
-	rr::Name,
-};
 use log::*;
-use tokio::{net::UdpSocket, select};
+use tokio::{
+	io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+	net::{TcpListener, TcpStream},
+	select,
+	signal::ctrl_c,
+	task,
+	time::timeout,
+};
 
+mod conf;
+mod diverge;
+mod domain_map;
 mod ipset;
-use ipset::IpSet;
+mod resolver;
+mod utils;
 
-struct Upstream {
-	name: String,
-	// resolver: AsyncResolver<GenericConnector<TokioRuntimeProvider>>,
-	ipset: Option<IpSet>,
-}
-
-struct Diverge(Vec<Upstream>);
-
-impl Diverge {
-	fn new() -> Self {
-		Self(Vec::new())
-	}
-}
+use diverge::Diverge;
+use utils::OrEx;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-	let d = UdpSocket::bind("127.0.0.1:1053").await.unwrap();
-	info!("downstream listening on {}", d.local_addr().unwrap());
+	// to do: setup diverge
+	let diverge = Diverge::new();
 
-	let u = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-	u.connect("1.1.1.1:53").await.unwrap();
-	info!(
-		"upstream connected to {} from {}",
-		u.peer_addr().unwrap(),
-		u.local_addr().unwrap()
-	);
+	let local = task::LocalSet::new();
+	local.run_until(main_ls(diverge)).await;
+}
 
-	let mut u_buf = [0u8; 4096];
-	let mut d_buf = [0u8; 4096];
-	let mut last_client: Option<SocketAddr> = None;
+// the real main running in a local set to
+async fn main_ls(diverge: Diverge) -> Option<()> {
+	let diverge = Rc::new(diverge);
+
+	let d = TcpListener::bind("127.0.0.1:1053")
+		.await
+		.or_debug("tcp bind error")?;
+	info!("listening on {}", d.local_addr().unwrap());
 
 	loop {
 		select! {
-			r = u.recv(&mut u_buf) => {
-				match r {
-					Ok(len) => {
-						trace!("{} bytes from upstream", len);
-						// dump u_buf to a file
-						std::fs::write("dump.bin", &u_buf[0..len]).unwrap();
-						let msg = Message::from_vec(&u_buf[0..len]).unwrap();
-						trace!("DNS Message: {:?}", msg);
-						if let Some(last_client) = last_client {
-							d.send_to(&u_buf[0..len], last_client).await.unwrap();
-						}
-					}
-					Err(e) => {
-						error!("recv error: {:?}", e);
-					}
-				}
+			d = d.accept() => {
+				let (socket, addr) = d.or_debug("tcp accept error")?;
+				info!("new connection from {}", addr);
+				let _ = task::spawn_local(handle_conn(socket, diverge.clone(), Duration::from_secs(5))).await;
 			}
-			r = d.recv_from(&mut d_buf) => {
-				match r {
-					Ok((len, src)) => {
-						trace!("{} bytes from {}", len, src);
-						last_client = Some(src);
-						let msg = Message::from_vec(&d_buf[0..len]).unwrap();
-						trace!("DNS Message: {:?}", msg);
-						u.send(&d_buf[0..len]).await.unwrap();
-					}
-					Err(e) => {
-						error!("recv error: {:?}", e);
-					}
-				}
+			_ = ctrl_c() => {
+				info!("ctrl-c received, exiting");
+				break;
 			}
 		}
 	}
+	Some(())
+}
+
+const BUF_LEN: usize = 0x10000;
+
+async fn handle_conn(s: TcpStream, diverge: Rc<Diverge>, d_timeout: Duration) -> Option<()> {
+	let mut buf = [0u8; BUF_LEN];
+	let (r, w) = s.into_split();
+	let mut r = BufReader::new(r);
+	let w = Rc::new(RefCell::new(w));
+	loop {
+		let len = timeout(d_timeout, r.read_u16())
+			.await
+			.or_debug("tcp timeout while reading length")?
+			.or_debug("tcp error while reading length")?;
+		let _ = timeout(d_timeout, r.read_exact(&mut buf[0..len as usize]))
+			.await
+			.or_debug("tcp timeout while reading dns message")?
+			.or_debug("tcp error while reading dns message")?;
+		// pipelining
+		task::spawn_local(handle_q(
+			w.clone(),
+			(&buf[0..len as usize]).to_vec(),
+			diverge.clone(),
+		));
+	}
+}
+
+async fn handle_q<W: AsyncWrite + Unpin>(
+	w: Rc<RefCell<W>>,
+	q: Vec<u8>,
+	diverge: Rc<Diverge>,
+) -> Option<()> {
+	let a = diverge.query(q).await.or_err("error handling query")?;
+	w.borrow_mut()
+		.write_all(&a)
+		.await
+		.or_debug("tcp write error")?;
+	Some(())
 }
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use hickory_proto::op::Message;
 
 	#[test]
-	fn it_works() {
-		let mut msg = Message::new();
-		// msg.add_answer(records);
+	fn sizes() {
+		println!("Duration: {}", std::mem::size_of::<std::time::Duration>());
+		println!("Message: {}", std::mem::size_of::<Message>());
+		println!(
+			"TokioAsyncResolver: {}",
+			std::mem::size_of::<hickory_resolver::TokioAsyncResolver>()
+		);
+		println!("Diverge: {}", std::mem::size_of::<Diverge>());
 	}
 }

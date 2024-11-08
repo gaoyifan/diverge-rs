@@ -7,9 +7,13 @@ edition = "2021"
 log = { version = "*", features = ["release_max_level_info"] }
 env_logger = "*"
 
-tokio = { version = "1", features = ["net", "rt", "macros"] }
+tokio = { version = "1", features = ["net", "rt", "macros", "signal", "time"] }
 hickory-proto = { version = "*", default-features = false }
-hickory-resolver = { version = "*", default-features = false, features = ["tokio-runtime", ]}
+hickory-resolver = { version = "*", default-features = false, features = [
+	"tokio-runtime",
+	"dns-over-rustls",
+	"native-certs"
+] }
 
 [profile.release]
 lto = true
