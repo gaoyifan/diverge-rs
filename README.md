@@ -17,14 +17,13 @@ what is this for?
 using result from `dnsA` will (likely) be (geographically or otherwise) suboptimal.
 	* and vice-versa.
 * diverge's solution:
-	* send request to `dnsA` and `dnsB`.
 	* if the response from `dnsA` is in `ipA`, use it.
-	* otherwise, use response from `dnsX`.
+	* otherwise, use `dnsX`.
 
 details
 ---
 * several measures to reduce response time.
-	* requests were sent concurrently.
+	* queries were sent concurrently.
 	* decisions were made when `dnsA` responded,
 	if the response qualify,
 	it was returned to the client immediately without waiting for `dnsX`.
@@ -45,23 +44,30 @@ diagnostics
 ---
 via the CHAOS class, example using dig or nslookup:
 * test domain list:
-	* `dig +tcp -p 1053 -c chaos -t txt @127.0.0.1 www.example.com`
+	* `dig +tcp -p 1053 @127.0.0.1 -c chaos -t txt www.example.com`
 	* `nslookup -vc -port=1053 -class=chaos -type=txt www.example.com 127.0.0.1`
-		* be aware, nslookup on Windows ignores `-port=` (always 53), but diverge typically doesn't listen on 53 (likely occupied by AdGuardHome).
+		* be aware, nslookup on Windows ignores `-port=` (always 53),
+		but diverge typically doesn't listen on 53 (likely occupied by AdGuardHome).
 * test IP set/list:
 	* `dig +tcp -p 1053 @127.0.0.1 -c chaos -x 1.1.1.1`
 	* `nslookup -vc -port=1053 -class=chaos -type=ptr 1.1.1.1 127.0.0.1`
 
-limitations
+more
 ---
-diverge intend be an upstream for AdGuardHome,
+* diverge intend to be an upstream for AdGuardHome,
 so certain features are omitted:
-* no cache.
-* listens on TCP only.
-
-extra
----
+	* no cache.
+	* listens on TCP only.
 * this is a port of [a previous project](https://github.com/Jimmy-Z/diverge) to Rust,
-some (useless) features are dropped from the Go version:
-	* decision cache (with redis dependency).
-	* listen on UDP.
+some features are dropped/different from the Go version:
+	* AAAA is IP set based too, instead of based on A decision.
+	* (dropped) decision cache (with redis dependency).
+	* (dropped) QTYPE other than A/AAAA/PTR.
+	* (dropped) listen on UDP.
+
+to do
+---
+* maybe ditch `hickory_resolver`
+	* since it doesn't support `hickory_proto::op::Message` anyway
+* sane log level
+* TXT?

@@ -29,11 +29,13 @@ async fn main() {
 
 	let local = task::LocalSet::new();
 	local.run_until(main_ls(diverge)).await;
+	local.await;
 }
 
-// the real main running in a local set to
+// the real main running in a local set
 async fn main_ls(diverge: Diverge) -> Option<()> {
 	let diverge = Rc::new(diverge);
+	let quit = Rc::new(RefCell::new(false));
 
 	let d = TcpListener::bind("127.0.0.1:1053")
 		.await
@@ -45,10 +47,16 @@ async fn main_ls(diverge: Diverge) -> Option<()> {
 			d = d.accept() => {
 				let (socket, addr) = d.or_debug("tcp accept error")?;
 				info!("new connection from {}", addr);
-				let _ = task::spawn_local(handle_conn(socket, diverge.clone(), Duration::from_secs(5))).await;
+				let _ = task::spawn_local(handle_conn(
+					diverge.clone(),
+					socket,
+					quit.clone(),
+					Duration::from_secs(5)
+				)).await;
 			}
 			_ = ctrl_c() => {
 				info!("ctrl-c received, exiting");
+				*quit.borrow_mut() = true;
 				break;
 			}
 		}
@@ -58,12 +66,21 @@ async fn main_ls(diverge: Diverge) -> Option<()> {
 
 const BUF_LEN: usize = 0x10000;
 
-async fn handle_conn(s: TcpStream, diverge: Rc<Diverge>, d_timeout: Duration) -> Option<()> {
+async fn handle_conn(
+	diverge: Rc<Diverge>,
+	s: TcpStream,
+	quit: Rc<RefCell<bool>>,
+	d_timeout: Duration,
+) -> Option<()> {
 	let mut buf = [0u8; BUF_LEN];
 	let (r, w) = s.into_split();
 	let mut r = BufReader::new(r);
 	let w = Rc::new(RefCell::new(w));
 	loop {
+		if *quit.borrow() {
+			debug!("tcp handle task quit");
+			break;
+		}
 		let len = timeout(d_timeout, r.read_u16())
 			.await
 			.or_debug("tcp timeout while reading length")?
@@ -74,23 +91,25 @@ async fn handle_conn(s: TcpStream, diverge: Rc<Diverge>, d_timeout: Duration) ->
 			.or_debug("tcp error while reading dns message")?;
 		// pipelining
 		task::spawn_local(handle_q(
+			diverge.clone(),
 			w.clone(),
 			(&buf[0..len as usize]).to_vec(),
-			diverge.clone(),
 		));
 	}
+	Some(())
 }
 
 async fn handle_q<W: AsyncWrite + Unpin>(
+	diverge: Rc<Diverge>,
 	w: Rc<RefCell<W>>,
 	q: Vec<u8>,
-	diverge: Rc<Diverge>,
 ) -> Option<()> {
-	let a = diverge.query(q).await.or_err("error handling query")?;
-	w.borrow_mut()
-		.write_all(&a)
+	let a = diverge.query(q).await.or_debug("diverge error")?;
+	let mut w = w.borrow_mut();
+	w.write_u16(a.len() as u16)
 		.await
 		.or_debug("tcp write error")?;
+	w.write_all(&a).await.or_debug("tcp write error")?;
 	Some(())
 }
 

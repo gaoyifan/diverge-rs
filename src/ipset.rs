@@ -110,6 +110,11 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn size() {
+		println!("size_of::<IpSet>: {}", std::mem::size_of::<IpSet>());
+	}
+
+	#[test]
 	fn test() {
 		let mut s = IpSet::new();
 		for (net, len) in [
