@@ -72,3 +72,4 @@ to do
 	* since it doesn't support `hickory_proto::op::Message` anyway
 * maybe ditch `hickory_proto` too
 * TXT support?
+* maybe optimize ipset using a bitmap like the go version
