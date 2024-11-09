@@ -20,8 +20,12 @@ impl<T: Copy> IpMap<T> {
 		}
 	}
 
-	pub fn from(&mut self, filename: &str, value: T) {
-		for line in std::fs::read_to_string(filename).unwrap().lines() {
+	pub fn from_file(&mut self, filename: &str, value: T) {
+		self.from_str(&std::fs::read_to_string(filename).unwrap(), value);
+	}
+
+	pub fn from_str(&mut self, list: &str, value: T) {
+		for line in list.lines() {
 			let line = line.trim();
 			if line.is_empty() || line.starts_with('#') {
 				continue;

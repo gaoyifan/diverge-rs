@@ -22,11 +22,12 @@ using result from `dnsA` will (likely) be (geographically or otherwise) suboptim
 
 details
 ---
-* several measures to reduce response time.
+* several measures to reduce response time:
 	* queries were sent concurrently.
 	* decisions were made when `dnsA` responded,
 	if the response qualify,
 	it was returned to the client immediately without waiting for `dnsX`.
+	* implemented RFC 7766 6.2.1.1 pipelining
 * if the response from `dnsA` contains multiple answers
 and only some of them are in `ipA`, others will be pruned.
 * more than 2 links are supported, like 3-way `A` `B` and `X`, or more.

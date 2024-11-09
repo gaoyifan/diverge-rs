@@ -11,7 +11,11 @@ impl<T: Copy> DomainMap<T> {
 		self.0.insert(k.to_string(), v);
 	}
 
-	pub fn from(&mut self, list: &str, v: T) {
+	pub fn from_file(&mut self, filename: &str, v: T) {
+		self.from_str(&std::fs::read_to_string(filename).unwrap(), v);
+	}
+
+	pub fn from_str(&mut self, list: &str, v: T) {
 		for line in list.lines() {
 			let line = line.trim_ascii();
 			if line.is_empty() || line.starts_with('#') {
@@ -22,6 +26,9 @@ impl<T: Copy> DomainMap<T> {
 	}
 
 	pub fn get(&self, mut k: &str) -> Option<T> {
+		if k.ends_with(".") {
+			k = &k[0..k.len() - 1];
+		}
 		loop {
 			if let Some(v) = self.0.get(k) {
 				return Some(*v);

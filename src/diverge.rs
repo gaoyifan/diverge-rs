@@ -30,10 +30,10 @@ impl Diverge {
 		for i in 0..conf.upstreams.len() {
 			let upconf = &conf.upstreams[i];
 			for fname in upconf.domains.iter() {
-				domain_map.from(fname, i as u8);
+				domain_map.from_file(fname, i as u8);
 			}
 			for fname in upconf.ips.iter() {
-				ip_map.from(fname, i as u8);
+				ip_map.from_file(fname, i as u8);
 			}
 			upstreams.push(Upstream {
 				name: upconf.name.clone(),
@@ -205,5 +205,6 @@ fn mk_msg(header: Header, answers: Vec<Record>) -> Option<Vec<u8>> {
 	// do I need to call this?
 	// resp.finalize(finalizer, inception_time)
 	trace!("dns response: {}", resp);
+	// to do: truncate if exceed 0xffff
 	resp.to_vec().or_debug("failed to serialize dns response")
 }

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, default, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 
 use conf::DivergeConf;
 use log::*;
@@ -38,7 +38,7 @@ async fn main() {
 
 	info!("read config from {}", &conf_fn);
 	let conf_str = std::fs::read_to_string(conf_fn).unwrap();
-	let conf = conf_str.parse::<DivergeConf>().unwrap();
+	let conf: DivergeConf = conf_str.parse().unwrap();
 	let diverge = Diverge::from(&conf);
 
 	let local = task::LocalSet::new();
@@ -97,7 +97,6 @@ async fn handle_conn(
 	let mut buf = [0u8; BUF_LEN];
 	let (r, w) = s.into_split();
 	let mut r = BufReader::new(r);
-	// RFC 7766 6.2.1.1 pipelining
 	let w = Rc::new(RefCell::new(w));
 	loop {
 		if *quit.borrow() {
@@ -113,6 +112,7 @@ async fn handle_conn(
 			.await
 			.or_debug("tcp timeout while reading dns message")?
 			.or_debug("tcp error while reading dns message")?;
+		// RFC 7766 6.2.1.1 pipelining
 		task::spawn_local(handle_q(
 			diverge.clone(),
 			w.clone(),
@@ -130,7 +130,7 @@ async fn handle_q<W: AsyncWrite + Unpin>(
 	let a = diverge.query(q).await.or_debug("diverge error")?;
 	if a.len() > 0xffff {
 		error!("answer too large: {}", a.len());
-		return None
+		return None;
 	}
 	// RFC 7766 8
 	let mut buf = Vec::with_capacity(2 + a.len());
