@@ -1,21 +1,26 @@
 use std::{
-	collections::{BTreeMap, BTreeSet},
+	collections::BTreeMap,
 	net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
 use log::*;
 
-pub struct IpSet(
-	BTreeMap<usize, BTreeSet<u32>>,
-	BTreeMap<usize, BTreeSet<u64>>,
-);
+pub struct IpMap<T> {
+	v4: BTreeMap<usize, BTreeMap<u32, T>>,
+	v6: BTreeMap<usize, BTreeMap<u64, T>>,
+	pub default: T,
+}
 
-impl IpSet {
-	pub fn new() -> Self {
-		Self(BTreeMap::new(), BTreeMap::new())
+impl<T: Copy> IpMap<T> {
+	pub fn new(default: T) -> Self {
+		Self {
+			v4: BTreeMap::new(),
+			v6: BTreeMap::new(),
+			default,
+		}
 	}
 
-	pub fn from(&mut self, filename: &str) {
+	pub fn from(&mut self, filename: &str, value: T) {
 		for line in std::fs::read_to_string(filename).unwrap().lines() {
 			let line = line.trim();
 			if line.is_empty() || line.starts_with('#') {
@@ -24,76 +29,76 @@ impl IpSet {
 			let (addr, len) = line.split_once('/').unwrap();
 			let addr: IpAddr = addr.parse().unwrap();
 			let len: usize = len.parse().unwrap();
-			self.insert(addr, len);
+			self.insert(&addr, len, value);
 		}
 	}
 
-	pub fn insert(&mut self, addr: IpAddr, cidr_len: usize) {
+	pub fn insert(&mut self, addr: &IpAddr, cidr_len: usize, value: T) {
 		match addr {
-			IpAddr::V4(net4) => self.insert_v4(net4, cidr_len),
-			IpAddr::V6(net6) => self.insert_v6(net6, cidr_len),
+			IpAddr::V4(net4) => self.insert_v4(net4, cidr_len, value),
+			IpAddr::V6(net6) => self.insert_v6(net6, cidr_len, value),
 		}
 	}
 
-	pub fn contains(&self, addr: IpAddr) -> bool {
+	pub fn get(&self, addr: &IpAddr) -> T {
 		match addr {
-			IpAddr::V4(addr4) => self.contains_v4(addr4),
-			IpAddr::V6(addr6) => self.contains_v6(addr6),
+			IpAddr::V4(addr4) => self.get_v4(addr4),
+			IpAddr::V6(addr6) => self.get_v6(addr6),
 		}
 	}
 
-	pub fn insert_v4(&mut self, addr: Ipv4Addr, cidr_len: usize) {
+	pub fn insert_v4(&mut self, addr: &Ipv4Addr, cidr_len: usize, value: T) {
 		if cidr_len > 32 {
 			warn!("CIDR length too large: {}", cidr_len);
 			return;
 		}
 		let net = ipv4_to_u32(addr) >> (32 - cidr_len);
-		self.0
+		self.v4
 			.entry(cidr_len)
-			.or_insert_with(BTreeSet::new)
-			.insert(net);
+			.or_insert_with(BTreeMap::new)
+			.insert(net, value);
 	}
 
-	pub fn insert_v6(&mut self, addr: Ipv6Addr, cidr_len: usize) {
+	pub fn insert_v6(&mut self, addr: &Ipv6Addr, cidr_len: usize, value: T) {
 		if cidr_len > 64 {
 			warn!("CIDR length too large: {}", cidr_len);
 			return;
 		}
 		let net = ipv6_to_u64(addr) >> (64 - cidr_len);
-		self.1
+		self.v6
 			.entry(cidr_len)
-			.or_insert_with(BTreeSet::new)
-			.insert(net);
+			.or_insert_with(BTreeMap::new)
+			.insert(net, value);
 	}
 
-	pub fn contains_v4(&self, addr: Ipv4Addr) -> bool {
+	pub fn get_v4(&self, addr: &Ipv4Addr) -> T {
 		let addr = ipv4_to_u32(addr);
-		for (len, set) in self.0.iter() {
-			if set.contains(&(addr >> (32 - *len))) {
-				return true;
+		for (len, map) in self.v4.iter() {
+			if let Some(v) = map.get(&(addr >> (32 - *len))) {
+				return *v;
 			}
 		}
-		return false;
+		return self.default;
 	}
 
-	pub fn contains_v6(&self, addr: Ipv6Addr) -> bool {
+	pub fn get_v6(&self, addr: &Ipv6Addr) -> T {
 		let addr = ipv6_to_u64(addr);
-		for (len, set) in self.1.iter() {
-			if set.contains(&(addr >> (64 - *len))) {
-				return true;
+		for (len, map) in self.v6.iter() {
+			if let Some(v) = map.get(&(addr >> (64 - *len))) {
+				return *v;
 			}
 		}
-		return false;
+		return self.default;
 	}
 }
 
-fn ipv4_to_u32(addr: Ipv4Addr) -> u32 {
+fn ipv4_to_u32(addr: &Ipv4Addr) -> u32 {
 	let a = addr.octets();
 	((a[0] as u32) << 24) + ((a[1] as u32) << 16) + ((a[2] as u32) << 8) + (a[3] as u32)
 }
 
 // just the first 8 bytes
-fn ipv6_to_u64(addr: Ipv6Addr) -> u64 {
+fn ipv6_to_u64(addr: &Ipv6Addr) -> u64 {
 	let a = addr.octets();
 	((a[0] as u64) << 56)
 		+ ((a[1] as u64) << 48)
@@ -111,19 +116,15 @@ mod tests {
 
 	#[test]
 	fn size() {
-		println!("size_of::<IpSet>: {}", std::mem::size_of::<IpSet>());
+		println!("size_of::<IpSet>: {}", std::mem::size_of::<IpMap<u8>>());
 	}
 
 	#[test]
 	fn test() {
-		let mut s = IpSet::new();
-		for (net, len) in [
-			("127.0.0.1", 24),
-			("2001:db8::", 32),
-
-		] {
+		let mut m = IpMap::new(false);
+		for (net, len) in [("127.0.0.1", 24), ("2001:db8::", 32)] {
 			let net: IpAddr = net.parse().unwrap();
-			s.insert(net, len);
+			m.insert(&net, len, true);
 		}
 
 		let tests = [
@@ -138,7 +139,7 @@ mod tests {
 		];
 		for (ip, expected) in tests.iter() {
 			let a: IpAddr = ip.parse().unwrap();
-			assert_eq!(s.contains(a), *expected);
+			assert_eq!(m.get(&a), *expected);
 		}
 	}
 }

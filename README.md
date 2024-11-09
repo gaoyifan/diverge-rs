@@ -38,7 +38,7 @@ and only some of them are in `ipA`, others will be pruned.
 		which should be fine since clients should fallback to IPv4.
 * also supports domain lists, and it takes precedence.
 	* this is meant to prevent DNS leakage.
-		* like you don't want `dnsA` to see you're accessing some website via `X`.
+		* like you don't want `dnsA` to see you're accessing some websites via `X`.
 
 diagnostics
 ---

@@ -11,13 +11,12 @@ use hickory_resolver::TokioAsyncResolver;
 use log::*;
 use tokio::task;
 
-use crate::ipset::IpSet;
+use crate::ipmap::IpMap;
 use crate::utils::OrEx;
 use crate::{domain_map::DomainMap, resolver};
 
 struct Upstream {
 	name: String,
-	ipset: Option<IpSet>,
 	resolver: Rc<TokioAsyncResolver>,
 	disable_aaaa: bool,
 }
@@ -33,40 +32,11 @@ impl Upstream {
 		}
 	}
 	*/
-	fn qualify(&self, addr: IpAddr) -> bool {
-		match self.ipset {
-			Some(ref ipset) => ipset.contains(addr),
-			// CAUTION: not false
-			_ => true,
-		}
-	}
-
-	// prune A/AAAA records, retain the rest, and return the number of remain A/AAAA records
-	fn prune(&self, ret: &mut Vec<Record>, records: &[Record]) -> usize {
-		let mut c = 0;
-		for r in records {
-			if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::A {
-				let a = r.data().unwrap().as_a().unwrap().0;
-				if self.qualify(IpAddr::V4(a)) {
-					ret.push(r.clone());
-					c += 1;
-				}
-			} else if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::AAAA {
-				let a = r.data().unwrap().as_aaaa().unwrap().0;
-				if self.qualify(IpAddr::V6(a)) {
-					ret.push(r.clone());
-					c += 1;
-				}
-			} else {
-				ret.push(r.clone());
-			}
-		}
-		c
-	}
 }
 
 pub struct Diverge {
 	domain_map: DomainMap,
+	ip_map: IpMap<u8>,
 	upstreams: Vec<Upstream>,
 }
 
@@ -74,6 +44,7 @@ impl Diverge {
 	pub fn new() -> Self {
 		Self {
 			domain_map: DomainMap::new(),
+			ip_map: IpMap::new(0),
 			upstreams: Vec::new(),
 		}
 	}
@@ -156,7 +127,7 @@ impl Diverge {
 			let resolver = &upstream.resolver;
 			let resp = resolver.lookup(&name, rtype).await;
 			if let Ok(resp) = resp {
-				let c = upstream.prune(&mut ret, resp.records());
+				let c = self.prune(&mut ret, resp.records(), i as u8);
 				if c == 0 {
 					warn!(
 						"domain map choose upstream {} for {}, but it returned no A records after pruning",
@@ -179,10 +150,9 @@ impl Diverge {
 				));
 			}
 			for (i, task) in tasks.into_iter() {
-				let upstream = &self.upstreams[i];
 				let resp = task.await;
 				if let Ok(Ok(resp)) = resp {
-					let c = upstream.prune(&mut ret, resp.records());
+					let c = self.prune(&mut ret, resp.records(), i as u8);
 					if c > 0 {
 						break;
 					}
@@ -190,6 +160,29 @@ impl Diverge {
 			}
 		}
 		ret
+	}
+
+	// prune A/AAAA records, retain the rest, and return the number of remain A/AAAA records
+	fn prune(&self, ret: &mut Vec<Record>, records: &[Record], v: u8) -> usize {
+		let mut c = 0;
+		for r in records {
+			if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::A {
+				let a = r.data().unwrap().as_a().unwrap().0;
+				if self.ip_map.get_v4(&a) == v {
+					ret.push(r.clone());
+					c += 1;
+				}
+			} else if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::AAAA {
+				let a = r.data().unwrap().as_aaaa().unwrap().0;
+				if self.ip_map.get_v6(&a) == v {
+					ret.push(r.clone());
+					c += 1;
+				}
+			} else {
+				ret.push(r.clone());
+			}
+		}
+		c
 	}
 }
 

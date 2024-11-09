@@ -6,11 +6,11 @@
 //		at least I thought it would be
 //	well it's a good practice, I think
 
-use std::fmt::Debug;
+use std::{fmt::Debug, str::FromStr};
 
 use log::warn;
 
-pub trait Section{
+pub trait Section {
 	fn set(&mut self, k: &str, v: &str);
 }
 
@@ -19,10 +19,9 @@ pub trait Conf {
 	fn sec_mut(&mut self, name: &str) -> &mut dyn Section;
 }
 
+// I'd very much like to impl FromStr for Conf, but that's not allowed
 pub trait ConfSized: Conf + Sized {
-	fn from_str(
-		conf: &str,
-	) -> Self {
+	fn from_str(conf: &str) -> Self {
 		let mut ret = Self::new();
 		let mut sec = None;
 		for l in conf.lines() {
@@ -58,8 +57,8 @@ use std::{
 
 use hickory_resolver::config::Protocol;
 
-#[derive(Debug)]
-struct DivergeConf {
+#[cfg_attr(debug_assertions, derive(Debug))]
+pub struct DivergeConf {
 	global: GlobalSec,
 	upstreams: Vec<UpstreamSec>,
 }
@@ -83,8 +82,15 @@ impl Conf for DivergeConf {
 	}
 }
 
-#[derive(Debug)]
-struct GlobalSec {
+impl FromStr for DivergeConf {
+	type Err = ();
+	fn from_str(conf: &str) -> Result<Self, Self::Err> {
+		Ok(<Self as ConfSized>::from_str(conf))
+	}
+}
+
+#[cfg_attr(debug_assertions, derive(Debug))]
+pub struct GlobalSec {
 	listen: SocketAddr,
 }
 
@@ -105,8 +111,8 @@ impl Section for GlobalSec {
 	}
 }
 
-#[derive(Debug)]
-struct UpstreamSec {
+#[cfg_attr(debug_assertions, derive(Debug))]
+pub struct UpstreamSec {
 	name: String,
 	protocol: Protocol,
 	addrs: Vec<IpAddr>,
@@ -169,10 +175,14 @@ mod tests {
 
 	#[test]
 	fn test() {
-		env_logger::builder().is_test(true).filter_level(log::LevelFilter::Trace).try_init().unwrap();
+		env_logger::builder()
+			.is_test(true)
+			.filter_level(log::LevelFilter::Trace)
+			.try_init()
+			.unwrap();
 		// read "example.conf" into a string
 		let conf = std::fs::read_to_string("example.conf").unwrap();
-		let dc = DivergeConf::from_str(&conf);
+		let dc: DivergeConf = conf.parse().unwrap();
 		println!("{:?}", dc);
 	}
 }

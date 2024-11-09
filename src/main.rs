@@ -3,7 +3,7 @@ use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 use log::*;
 use tokio::{
 	io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
-	net::{TcpListener, TcpSocket, TcpStream},
+	net::{TcpSocket, TcpStream},
 	select,
 	signal::ctrl_c,
 	task,
@@ -13,7 +13,7 @@ use tokio::{
 mod conf;
 mod diverge;
 mod domain_map;
-mod ipset;
+mod ipmap;
 mod resolver;
 mod utils;
 
@@ -42,7 +42,6 @@ async fn main_ls(diverge: Diverge) -> Option<()> {
 		SocketAddr::V4(_) => TcpSocket::new_v4().unwrap(),
 		SocketAddr::V6(_) => TcpSocket::new_v6().unwrap(),
 	};
-	s.set_reuseaddr(true).unwrap();
 	s.set_nodelay(true).unwrap();
 	s.bind(addr).unwrap();
 
