@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 
-pub struct DomainMap(HashMap<String, usize>);
+pub struct DomainMap<T>(HashMap<String, T>);
 
-impl DomainMap {
+impl<T: Copy> DomainMap<T> {
 	pub fn new() -> Self {
 		Self(HashMap::new())
 	}
 
-	pub fn insert(&mut self, k: &str, v: usize) {
+	pub fn insert(&mut self, k: &str, v: T) {
 		self.0.insert(k.to_string(), v);
 	}
 
-	pub fn from(&mut self, list: &str, v: usize) {
+	pub fn from(&mut self, list: &str, v: T) {
 		for line in list.lines() {
 			let line = line.trim_ascii();
 			if line.is_empty() || line.starts_with('#') {
@@ -21,7 +21,7 @@ impl DomainMap {
 		}
 	}
 
-	pub fn get(&self, mut k: &str) -> Option<usize> {
+	pub fn get(&self, mut k: &str) -> Option<T> {
 		loop {
 			if let Some(v) = self.0.get(k) {
 				return Some(*v);
@@ -42,10 +42,10 @@ mod tests {
 	#[test]
 	fn test() {
 		let mut m = DomainMap::new();
-		m.insert("a.a", 1);
+		m.insert("a.a", ());
 		for (t, e) in [
-			("a.a", Some(1)),
-			("a.a.a", Some(1)),
+			("a.a", Some(())),
+			("a.a.a", Some(())),
 			("a", None),
 			("b.a", None),
 			("aa.a", None),

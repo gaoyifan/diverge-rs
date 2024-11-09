@@ -1,13 +1,11 @@
-use std::net::IpAddr;
+use std::net::SocketAddr;
 
-use hickory_proto::{op, rr::rdata::name};
 use hickory_resolver::{
 	config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
 	TokioAsyncResolver,
 };
-use log::*;
 
-use crate::conf::Section;
+use crate::conf::UpstreamSec;
 
 fn default_port(protocol: Protocol) -> u16 {
 	match protocol {
@@ -17,19 +15,23 @@ fn default_port(protocol: Protocol) -> u16 {
 	}
 }
 
-pub fn from(url: &str) -> TokioAsyncResolver {
+pub fn from(conf: &UpstreamSec) -> TokioAsyncResolver {
 	let mut config = ResolverConfig::new();
-
-	config.add_name_server(NameServerConfig {
-		socket_addr: "1.1.1.1:853".parse().unwrap(),
-		protocol: Protocol::Tls,
-		// tls_dns_name: Some("cloudflare-dns.com".to_string()),
-		tls_dns_name: Some("1.1.1.1".to_string()),
-		// tls_dns_name: None,
-		trust_negative_responses: true,
-		tls_config: None,
-		bind_addr: None,
-	});
+	let port = conf.port.unwrap_or(default_port(conf.protocol));
+	for addr in &conf.addrs {
+		config.add_name_server(NameServerConfig {
+			socket_addr: SocketAddr::new(*addr, port),
+			protocol: conf.protocol,
+			tls_dns_name: if conf.protocol == Protocol::Tls {
+				Some(addr.to_string())
+			} else {
+				None
+			},
+			trust_negative_responses: true,
+			tls_config: None,
+			bind_addr: None,
+		});
+	}
 
 	let mut opts = ResolverOpts::default();
 	// default 5 seconds
@@ -48,21 +50,30 @@ pub fn from(url: &str) -> TokioAsyncResolver {
 
 #[cfg(test)]
 mod tests {
-	// use hickory_proto::rr::RecordType;
+	use hickory_proto::rr::RecordType;
+
+// use hickory_proto::rr::RecordType;
 	use super::*;
 
 	#[tokio::test]
 	async fn test() {
 		// let r = TokioAsyncResolver::tokio(ResolverConfig::cloudflare_tls(), ResolverOpts::default());
 		// let r = TokioAsyncResolver::tokio(ResolverConfig::google_tls(), ResolverOpts::default());
-		let r = from("");
-		let resp = r.lookup_ip("www.google.com").await.unwrap();
+		let r = from(&UpstreamSec {
+			name: "".to_string(),
+			protocol: Protocol::Tls,
+			addrs: vec!["1.1.1.1".parse().unwrap()],
+			port: None,
+			ips: vec![],
+			domains: vec![],
+			disable_aaaa: false,
+		});
+		let resp = r.lookup("www.example.com", RecordType::A).await.unwrap();
 		for a in resp {
 			println!("{:?}", a);
 		}
 	}
 
 	#[tokio::test]
-	async fn test2() {
-	}
+	async fn test2() {}
 }

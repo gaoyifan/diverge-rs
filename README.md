@@ -40,7 +40,7 @@ and only some of them are in `ipA`, others will be pruned.
 	* this is meant to prevent DNS leakage.
 		* like you don't want `dnsA` to see you're accessing some websites via `X`.
 
-diagnostics
+diagnostics (planned)
 ---
 via the CHAOS class, example using dig or nslookup:
 * test domain list:

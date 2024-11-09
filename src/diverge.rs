@@ -1,19 +1,14 @@
-use std::{
-	net::{IpAddr, Ipv4Addr, Ipv6Addr},
-	rc::Rc,
-};
+use std::rc::Rc;
 
 use hickory_proto::{
-	op::{header::MessageType, Header, Message, OpCode, ResponseCode},
-	rr::{DNSClass, Name, Record, RecordType},
+	op::{header::MessageType, Header, Message, ResponseCode},
+	rr::{DNSClass, Record, RecordType},
 };
 use hickory_resolver::TokioAsyncResolver;
 use log::*;
 use tokio::task;
 
-use crate::ipmap::IpMap;
-use crate::utils::OrEx;
-use crate::{domain_map::DomainMap, resolver};
+use crate::{conf::DivergeConf, domain_map::DomainMap, ipmap::IpMap, resolver, utils::OrEx};
 
 struct Upstream {
 	name: String,
@@ -21,38 +16,42 @@ struct Upstream {
 	disable_aaaa: bool,
 }
 
-impl Upstream {
-	/*
-	fn new(name: &str) -> Self {
-		Self {
-			name: name.to_string(),
-			ipset: None,
-			resolver: TokioAsyncResolver::tokio_from_system_conf().unwrap(),
-			disable_aaaa: false,
-		}
-	}
-	*/
-}
-
 pub struct Diverge {
-	domain_map: DomainMap,
+	domain_map: DomainMap<u8>,
 	ip_map: IpMap<u8>,
 	upstreams: Vec<Upstream>,
 }
 
 impl Diverge {
-	pub fn new() -> Self {
+	pub fn from(conf: &DivergeConf) -> Self {
+		let mut domain_map = DomainMap::new();
+		let mut ip_map = IpMap::new((conf.upstreams.len() - 1) as u8);
+		let mut upstreams = Vec::new();
+		for i in 0..conf.upstreams.len() {
+			let upconf = &conf.upstreams[i];
+			for fname in upconf.domains.iter() {
+				domain_map.from(fname, i as u8);
+			}
+			for fname in upconf.ips.iter() {
+				ip_map.from(fname, i as u8);
+			}
+			upstreams.push(Upstream {
+				name: upconf.name.clone(),
+				resolver: Rc::new(resolver::from(upconf)),
+				disable_aaaa: upconf.disable_aaaa,
+			})
+		}
 		Self {
-			domain_map: DomainMap::new(),
-			ip_map: IpMap::new(0),
-			upstreams: Vec::new(),
+			domain_map,
+			ip_map,
+			upstreams,
 		}
 	}
 
 	pub async fn query(&self, q: Vec<u8>) -> Option<Vec<u8>> {
 		// seriously, why not just let user send it as is and let the resolver do the work?
 		let query = Message::from_vec(&q).or_debug("invalid dns message")?;
-		debug!("dns query: {}", query);
+		trace!("dns query: {}", query);
 		let query_header = query.header();
 
 		let mut header = Header::response_from_request(query_header);
@@ -85,12 +84,12 @@ impl Diverge {
 				RecordType::A => {
 					let name = q.name().to_string();
 					info!("A {}", name);
-					answers = self.query_a(name, RecordType::A).await;
+					answers = self.query_ip(name, RecordType::A).await;
 				}
 				RecordType::AAAA => {
 					let name = q.name().to_string();
 					info!("AAAA {}", name);
-					answers = self.query_a(name, RecordType::AAAA).await;
+					answers = self.query_ip(name, RecordType::AAAA).await;
 				}
 				RecordType::PTR => {
 					let n = q.name().to_string();
@@ -112,11 +111,11 @@ impl Diverge {
 		mk_msg(header, answers)
 	}
 
-	// actually A/AAAA
-	async fn query_a(&self, name: String, rtype: RecordType) -> Vec<Record> {
+	// handles A/AAAA
+	async fn query_ip(&self, name: String, rtype: RecordType) -> Vec<Record> {
 		let mut ret = Vec::new();
 		if let Some(i) = self.domain_map.get(&name) {
-			let upstream = &self.upstreams[i];
+			let upstream = &self.upstreams[i as usize];
 			if upstream.disable_aaaa && rtype == RecordType::AAAA {
 				warn!(
 					"domain map choose upstream {} for {}, but AAAA is disabled",
@@ -125,15 +124,18 @@ impl Diverge {
 				return ret;
 			}
 			let resolver = &upstream.resolver;
+			info!("domain map choose upstream {} for {}", &upstream.name, &name);
 			let resp = resolver.lookup(&name, rtype).await;
 			if let Ok(resp) = resp {
 				let c = self.prune(&mut ret, resp.records(), i as u8);
 				if c == 0 {
 					warn!(
-						"domain map choose upstream {} for {}, but it returned no A records after pruning",
+						"domain map choose upstream {} for {}, but all records are pruned",
 						upstream.name, &name
 					);
 				}
+			} else {
+				trace!("upstream {} failed to resolve {}: {:?}", &upstream.name, &name, resp);
 			}
 		} else {
 			let mut tasks = Vec::new();
@@ -151,11 +153,15 @@ impl Diverge {
 			}
 			for (i, task) in tasks.into_iter() {
 				let resp = task.await;
+				let uname = &self.upstreams[i].name;
 				if let Ok(Ok(resp)) = resp {
 					let c = self.prune(&mut ret, resp.records(), i as u8);
 					if c > 0 {
+						info!("ip map choose upstream {} for {}", uname, &name);
 						break;
 					}
+				} else {
+					trace!("upstream {} failed to resolve {}: {:?}", uname, &name, resp);
 				}
 			}
 		}
@@ -169,14 +175,20 @@ impl Diverge {
 			if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::A {
 				let a = r.data().unwrap().as_a().unwrap().0;
 				if self.ip_map.get_v4(&a) == v {
+					trace!("kept A {}", a);
 					ret.push(r.clone());
 					c += 1;
+				} else {
+					trace!("prune A {}", a);
 				}
 			} else if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::AAAA {
 				let a = r.data().unwrap().as_aaaa().unwrap().0;
 				if self.ip_map.get_v6(&a) == v {
+					trace!("keep AAAA {}", a);
 					ret.push(r.clone());
 					c += 1;
+				} else {
+					trace!("prune AAAA {}", a);
 				}
 			} else {
 				ret.push(r.clone());
@@ -192,6 +204,6 @@ fn mk_msg(header: Header, answers: Vec<Record>) -> Option<Vec<u8>> {
 	resp.add_answers(answers);
 	// do I need to call this?
 	// resp.finalize(finalizer, inception_time)
-	debug!("dns response: {}", resp);
+	trace!("dns response: {}", resp);
 	resp.to_vec().or_debug("failed to serialize dns response")
 }

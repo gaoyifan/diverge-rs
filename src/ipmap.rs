@@ -8,7 +8,7 @@ use log::*;
 pub struct IpMap<T> {
 	v4: BTreeMap<usize, BTreeMap<u32, T>>,
 	v6: BTreeMap<usize, BTreeMap<u64, T>>,
-	pub default: T,
+	default: T,
 }
 
 impl<T: Copy> IpMap<T> {

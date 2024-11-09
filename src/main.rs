@@ -1,5 +1,6 @@
-use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, default, net::SocketAddr, rc::Rc, time::Duration};
 
+use conf::DivergeConf;
 use log::*;
 use tokio::{
 	io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -24,26 +25,38 @@ use utils::OrEx;
 async fn main() {
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-	// to do: setup diverge
-	let diverge = Diverge::new();
+	#[cfg(debug_assertions)]
+	let default_conf = "tests/test.conf".to_string();
+	#[cfg(not(debug_assertions))]
+	let default_conf = "diverge.conf".to_string();
+
+	let conf_fn = if std::env::args().len() < 2 {
+		default_conf
+	} else {
+		std::env::args().nth(1).unwrap()
+	};
+
+	info!("read config from {}", &conf_fn);
+	let conf_str = std::fs::read_to_string(conf_fn).unwrap();
+	let conf = conf_str.parse::<DivergeConf>().unwrap();
+	let diverge = Diverge::from(&conf);
 
 	let local = task::LocalSet::new();
-	local.run_until(main_ls(diverge)).await;
+	local.run_until(main_ls(conf.global.listen, diverge)).await;
 	local.await;
 }
 
 // the real main running in a local set
-async fn main_ls(diverge: Diverge) -> Option<()> {
+async fn main_ls(listen: SocketAddr, diverge: Diverge) -> Option<()> {
 	let diverge = Rc::new(diverge);
 	let quit = Rc::new(RefCell::new(false));
 
-	let addr: SocketAddr = "127.0.0.1:1053".parse().unwrap();
-	let s = match addr {
+	let s = match listen {
 		SocketAddr::V4(_) => TcpSocket::new_v4().unwrap(),
 		SocketAddr::V6(_) => TcpSocket::new_v6().unwrap(),
 	};
 	s.set_nodelay(true).unwrap();
-	s.bind(addr).unwrap();
+	s.bind(listen).unwrap();
 
 	let d = s.listen(64).unwrap();
 	info!("listening on {}", d.local_addr().unwrap());

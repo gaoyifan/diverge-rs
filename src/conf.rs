@@ -50,17 +50,14 @@ pub trait ConfSized: Conf + Sized {
 }
 impl<T: Conf + Sized> ConfSized for T {}
 
-use std::{
-	net::{IpAddr, SocketAddr},
-	num::NonZeroU16,
-};
+use std::net::{IpAddr, SocketAddr};
 
 use hickory_resolver::config::Protocol;
 
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub struct DivergeConf {
-	global: GlobalSec,
-	upstreams: Vec<UpstreamSec>,
+	pub global: GlobalSec,
+	pub upstreams: Vec<UpstreamSec>,
 }
 
 impl Conf for DivergeConf {
@@ -91,7 +88,7 @@ impl FromStr for DivergeConf {
 
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub struct GlobalSec {
-	listen: SocketAddr,
+	pub listen: SocketAddr,
 }
 
 impl GlobalSec {
@@ -113,12 +110,13 @@ impl Section for GlobalSec {
 
 #[cfg_attr(debug_assertions, derive(Debug))]
 pub struct UpstreamSec {
-	name: String,
-	protocol: Protocol,
-	addrs: Vec<IpAddr>,
-	port: Option<NonZeroU16>,
-	ips: Vec<String>,
-	domains: Vec<String>,
+	pub name: String,
+	pub protocol: Protocol,
+	pub addrs: Vec<IpAddr>,
+	pub port: Option<u16>,
+	pub ips: Vec<String>,
+	pub domains: Vec<String>,
+	pub disable_aaaa: bool,
 }
 
 impl UpstreamSec {
@@ -130,6 +128,7 @@ impl UpstreamSec {
 			port: None,
 			ips: Vec::new(),
 			domains: Vec::new(),
+			disable_aaaa: false,
 		}
 	}
 }
@@ -163,6 +162,7 @@ impl Section for UpstreamSec {
 			},
 			"ips" => self.ips = v.split_ascii_whitespace().map(|s| s.to_string()).collect(),
 			"domains" => self.domains = v.split_ascii_whitespace().map(|s| s.to_string()).collect(),
+			"disable_aaaa" => self.disable_aaaa = v.parse().unwrap(),
 			_ => warn!("unknown key: \"{}\"", k),
 		}
 	}
