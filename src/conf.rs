@@ -6,7 +6,9 @@
 //		at least I thought it would be
 //	well it's a good practice, I think
 
-use std::{fmt::Debug, str::FromStr};
+#[cfg(debug_assertions)]
+use std::fmt::Debug;
+use std::str::FromStr;
 
 use log::warn;
 

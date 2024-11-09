@@ -27,7 +27,7 @@ pub fn from(conf: &UpstreamSec) -> TokioAsyncResolver {
 			} else {
 				None
 			},
-			trust_negative_responses: true,
+			trust_negative_responses: conf.protocol == Protocol::Tls,
 			tls_config: None,
 			bind_addr: None,
 		});

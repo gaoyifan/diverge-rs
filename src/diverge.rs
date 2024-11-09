@@ -1,14 +1,14 @@
 use std::rc::Rc;
 
 use hickory_proto::{
-	op::{header::MessageType, Header, Message, ResponseCode},
+	op::{header::MessageType, Header, Message, Query, ResponseCode},
 	rr::{DNSClass, Record, RecordType},
 };
 use hickory_resolver::TokioAsyncResolver;
 use log::*;
 use tokio::task;
 
-use crate::{conf::DivergeConf, domain_map::DomainMap, ipmap::IpMap, resolver, utils::OrEx};
+use crate::{conf::DivergeConf, domain_map::DomainMap, ip_map::IpMap, resolver, utils::OrEx};
 
 struct Upstream {
 	name: String,
@@ -60,25 +60,35 @@ impl Diverge {
 		if query_header.message_type() != MessageType::Query {
 			debug!("expected query, got {}", query_header.message_type());
 			header.set_response_code(ResponseCode::FormErr);
-			return mk_msg(header, answers);
+			return mk_msg(header, None, answers);
 		}
 		// we only support 1 question
 		if query_header.query_count() == 0 {
 			debug!("expected 1 question, got {}", query_header.query_count());
 			header.set_response_code(ResponseCode::FormErr);
-			return mk_msg(header, answers);
-		} else if query_header.query_count() > 1 {
+			return mk_msg(header, None, answers);
+		}
+
+		let q = &query.queries()[0];
+
+		if query_header.query_count() > 1 {
 			debug!("expected 1 question, got {}", query_header.query_count());
 			header.set_response_code(ResponseCode::NotImp);
-			return mk_msg(header, answers);
+			return mk_msg(header, Some(q), answers);
 		}
 		if query_header.answer_count() != 0 {
 			debug!("expected 0 answer, got {}", query_header.query_count());
 			header.set_response_code(ResponseCode::FormErr);
-			return mk_msg(header, answers);
+			return mk_msg(header, Some(q), answers);
 		}
 
-		let q = &query.queries()[0];
+		// to do: handle edns
+
+		// not _really_ sure if it's supported but we don't have access to header flags from hickory
+		if query_header.recursion_desired() {
+			header.set_recursion_available(true);
+		}
+
 		match q.query_class() {
 			DNSClass::IN => match q.query_type() {
 				RecordType::A => {
@@ -98,7 +108,7 @@ impl Diverge {
 				}
 				_ => {
 					debug!("unsupported query type: {:?}", q.query_type());
-					header.set_response_code(ResponseCode::FormErr);
+					header.set_response_code(ResponseCode::NotImp);
 				}
 			},
 			DNSClass::CH => {
@@ -108,12 +118,12 @@ impl Diverge {
 				debug!("unsupported class: {:?}", q.query_type());
 			}
 		}
-		mk_msg(header, answers)
+		mk_msg(header, Some(q), answers)
 	}
 
 	// handles A/AAAA
 	async fn query_ip(&self, name: String, rtype: RecordType) -> Vec<Record> {
-		let mut ret = Vec::new();
+		let mut ret = Vec::with_capacity(0x20);
 		if let Some(i) = self.domain_map.get(&name) {
 			let upstream = &self.upstreams[i as usize];
 			if upstream.disable_aaaa && rtype == RecordType::AAAA {
@@ -133,6 +143,7 @@ impl Diverge {
 						"domain map choose upstream {} for {}, but all records are pruned",
 						upstream.name, &name
 					);
+					ret.clear();
 				}
 			} else {
 				trace!("upstream {} failed to resolve {}: {:?}", &upstream.name, &name, resp);
@@ -159,6 +170,8 @@ impl Diverge {
 					if c > 0 {
 						info!("ip map choose upstream {} for {}", uname, &name);
 						break;
+					} else {
+						ret.clear();
 					}
 				} else {
 					trace!("upstream {} failed to resolve {}: {:?}", uname, &name, resp);
@@ -198,9 +211,12 @@ impl Diverge {
 	}
 }
 
-fn mk_msg(header: Header, answers: Vec<Record>) -> Option<Vec<u8>> {
+fn mk_msg(header: Header, q: Option<&Query>, answers: Vec<Record>) -> Option<Vec<u8>> {
 	let mut resp = Message::new();
 	resp.set_header(header);
+	if let Some(q) = q {
+		resp.add_query(q.to_owned());
+	}
 	resp.add_answers(answers);
 	// do I need to call this?
 	// resp.finalize(finalizer, inception_time)

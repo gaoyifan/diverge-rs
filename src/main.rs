@@ -1,4 +1,4 @@
-use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration, io::ErrorKind};
 
 use conf::DivergeConf;
 use log::*;
@@ -14,7 +14,7 @@ use tokio::{
 mod conf;
 mod diverge;
 mod domain_map;
-mod ipmap;
+mod ip_map;
 mod resolver;
 mod utils;
 
@@ -39,6 +39,7 @@ async fn main() {
 	info!("read config from {}", &conf_fn);
 	let conf_str = std::fs::read_to_string(conf_fn).unwrap();
 	let conf: DivergeConf = conf_str.parse().unwrap();
+
 	let diverge = Diverge::from(&conf);
 
 	let local = task::LocalSet::new();
@@ -103,11 +104,19 @@ async fn handle_conn(
 			debug!("tcp handle task quit");
 			break;
 		}
-		let len = timeout(d_timeout, r.read_u16())
+		let len = match timeout(d_timeout, r.read_u16())
 			.await
-			// to do: peaceful eof handling
-			.or_debug("tcp timeout while reading length")?
-			.or_debug("tcp error while reading length")?;
+			.or_info("tcp timeout while waiting client request, connection closed")? {
+				Ok(len) => len,
+				Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
+					info!("tcp eof, client closed");
+					break;
+				},
+				Err(e) => {
+					warn!("tcp error while waiting client request: {}", e);
+					return None;
+				}
+			};
 		let _ = timeout(r_timeout, r.read_exact(&mut buf[0..len as usize]))
 			.await
 			.or_debug("tcp timeout while reading dns message")?

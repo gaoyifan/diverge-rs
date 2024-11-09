@@ -34,9 +34,9 @@ and only some of them are in `ipA`, others will be pruned.
 	* `A` and `B` would both have their corresponding `ipA`/`ipB` and `dnsA`/`dnsB`
 * there's an option to disable AAAA per upstream.
 	* when link `X` doesn't support AAAA, but `dnsX` does.
-	* still filter/prune AAAA results from `dnsA`.
-	* will return NXDOMAIN for addresses out of `ipA`,
-		which should be fine since clients should fallback to IPv4.
+	* still filter/prune answers from `dnsA`.
+		* will return no answer if all answers were pruned,
+			which should be fine since clients should fallback to IPv4.
 * also supports domain lists, and it takes precedence.
 	* this is meant to prevent DNS leakage.
 		* like you don't want `dnsA` to see you're accessing some websites via `X`.
@@ -45,13 +45,13 @@ diagnostics (planned)
 ---
 via the CHAOS class, example using dig or nslookup:
 * test domain list:
-	* `dig +tcp -p 1053 @127.0.0.1 -c chaos -t txt www.example.com`
-	* `nslookup -vc -port=1053 -class=chaos -type=txt www.example.com 127.0.0.1`
+	* `dig +tcp -p 1054 @127.0.0.1 -c chaos -t txt www.example.com`
+	* `nslookup -vc -port=1054 -class=chaos -type=txt www.example.com 127.0.0.1`
 		* be aware, nslookup on Windows ignores `-port=` (always 53),
 		but diverge typically doesn't listen on 53 (likely occupied by AdGuardHome).
 * test IP set/list:
-	* `dig +tcp -p 1053 @127.0.0.1 -c chaos -x 1.1.1.1`
-	* `nslookup -vc -port=1053 -class=chaos -type=ptr 1.1.1.1 127.0.0.1`
+	* `dig +tcp -p 1054 @127.0.0.1 -c chaos -x 1.1.1.1`
+	* `nslookup -vc -port=1054 -class=chaos -type=ptr 1.1.1.1 127.0.0.1`
 
 more
 ---
