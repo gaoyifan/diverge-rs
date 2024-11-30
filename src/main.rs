@@ -1,4 +1,4 @@
-use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration, io::ErrorKind};
+use std::{cell::RefCell, io::ErrorKind, net::SocketAddr, rc::Rc, time::Duration};
 
 use conf::DivergeConf;
 use log::*;
@@ -106,17 +106,18 @@ async fn handle_conn(
 		}
 		let len = match timeout(d_timeout, r.read_u16())
 			.await
-			.or_info("tcp timeout while waiting client request, connection closed")? {
-				Ok(len) => len,
-				Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
-					info!("tcp eof, client closed");
-					break;
-				},
-				Err(e) => {
-					warn!("tcp error while waiting client request: {}", e);
-					return None;
-				}
-			};
+			.or_info("tcp timeout while waiting client request, connection closed")?
+		{
+			Ok(len) => len,
+			Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
+				info!("tcp eof, client closed");
+				break;
+			}
+			Err(e) => {
+				warn!("tcp error while waiting client request: {}", e);
+				return None;
+			}
+		};
 		let _ = timeout(r_timeout, r.read_exact(&mut buf[0..len as usize]))
 			.await
 			.or_debug("tcp timeout while reading dns message")?
@@ -125,7 +126,7 @@ async fn handle_conn(
 		task::spawn_local(handle_q(
 			diverge.clone(),
 			w.clone(),
-			(&buf[0..len as usize]).to_vec(),
+			buf[0..len as usize].to_vec(),
 		));
 	}
 	Some(())
@@ -145,6 +146,9 @@ async fn handle_q<W: AsyncWrite + Unpin>(
 	let mut buf = Vec::with_capacity(2 + a.len());
 	buf.extend_from_slice(&(a.len() as u16).to_be_bytes()[..]);
 	buf.extend_from_slice(&a);
+
+	// clippy will warn about this, but it's intended
+	// we're using the current thread runtime, so this should be fine?
 	w.borrow_mut()
 		.write_all(&buf)
 		.await

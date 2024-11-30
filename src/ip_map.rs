@@ -20,11 +20,11 @@ impl<T: Copy> IpMap<T> {
 		}
 	}
 
-	pub fn from_file(&mut self, filename: &str, value: T) {
-		self.from_str(&std::fs::read_to_string(filename).unwrap(), value);
+	pub fn append_from_file(&mut self, filename: &str, value: T) {
+		self.append_from_str(&std::fs::read_to_string(filename).unwrap(), value);
 	}
 
-	pub fn from_str(&mut self, list: &str, value: T) {
+	pub fn append_from_str(&mut self, list: &str, value: T) {
 		for line in list.lines() {
 			let line = line.trim();
 			if line.is_empty() || line.starts_with('#') {
@@ -57,10 +57,7 @@ impl<T: Copy> IpMap<T> {
 			return;
 		}
 		let net = ipv4_to_u32(addr) >> (32 - cidr_len);
-		self.v4
-			.entry(cidr_len)
-			.or_insert_with(BTreeMap::new)
-			.insert(net, value);
+		self.v4.entry(cidr_len).or_default().insert(net, value);
 	}
 
 	pub fn insert_v6(&mut self, addr: &Ipv6Addr, cidr_len: usize, value: T) {
@@ -69,10 +66,7 @@ impl<T: Copy> IpMap<T> {
 			return;
 		}
 		let net = ipv6_to_u64(addr) >> (64 - cidr_len);
-		self.v6
-			.entry(cidr_len)
-			.or_insert_with(BTreeMap::new)
-			.insert(net, value);
+		self.v6.entry(cidr_len).or_default().insert(net, value);
 	}
 
 	pub fn get_v4(&self, addr: &Ipv4Addr) -> T {
@@ -82,7 +76,7 @@ impl<T: Copy> IpMap<T> {
 				return *v;
 			}
 		}
-		return self.default;
+		self.default
 	}
 
 	pub fn get_v6(&self, addr: &Ipv6Addr) -> T {
@@ -92,7 +86,7 @@ impl<T: Copy> IpMap<T> {
 				return *v;
 			}
 		}
-		return self.default;
+		self.default
 	}
 }
 

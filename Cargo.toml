@@ -15,6 +15,9 @@ hickory-resolver = { version = "*", default-features = false, features = [
 	"native-certs"
 ] }
 
+[dev-dependencies]
+rand = "*"
+
 [profile.release]
 lto = true
 strip = true

@@ -6,6 +6,7 @@ pub trait Or<T> {
 	fn or(self, level: Level, msg: &str) -> T;
 }
 
+#[allow(dead_code)]
 pub trait OrEx<T> {
 	fn or_err(self, msg: &str) -> T;
 	fn or_warn(self, msg: &str) -> T;

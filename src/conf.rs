@@ -12,17 +12,16 @@ use std::str::FromStr;
 
 use log::warn;
 
+// this is the part that's generic
+
 pub trait Section {
 	fn set(&mut self, k: &str, v: &str);
 }
 
-pub trait Conf {
+pub trait Conf: Sized {
 	fn new() -> Self;
 	fn sec_mut(&mut self, name: &str) -> &mut dyn Section;
-}
-
-// I'd very much like to impl FromStr for Conf, but that's not allowed
-pub trait ConfSized: Conf + Sized {
+	// I'd very much like to impl FromStr for Conf, but that's not allowed
 	fn from_str(conf: &str) -> Self {
 		let mut ret = Self::new();
 		let mut sec = None;
@@ -50,7 +49,8 @@ pub trait ConfSized: Conf + Sized {
 		ret
 	}
 }
-impl<T: Conf + Sized> ConfSized for T {}
+
+// the following is specific to diverge's conf
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -84,7 +84,7 @@ impl Conf for DivergeConf {
 impl FromStr for DivergeConf {
 	type Err = ();
 	fn from_str(conf: &str) -> Result<Self, Self::Err> {
-		Ok(<Self as ConfSized>::from_str(conf))
+		Ok(<Self as Conf>::from_str(conf))
 	}
 }
 
@@ -173,7 +173,6 @@ impl Section for UpstreamSec {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use env_logger;
 
 	#[test]
 	fn test() {

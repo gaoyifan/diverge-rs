@@ -1,4 +1,7 @@
-use std::rc::Rc;
+use std::{
+	net::{IpAddr, Ipv4Addr, Ipv6Addr},
+	rc::Rc,
+};
 
 use hickory_proto::{
 	op::{header::MessageType, Header, Message, Query, ResponseCode},
@@ -30,10 +33,10 @@ impl Diverge {
 		for i in 0..conf.upstreams.len() {
 			let upconf = &conf.upstreams[i];
 			for fname in upconf.domains.iter() {
-				domain_map.from_file(fname, i as u8);
+				domain_map.append_from_file(fname, i as u8);
 			}
 			for fname in upconf.ips.iter() {
-				ip_map.from_file(fname, i as u8);
+				ip_map.append_from_file(fname, i as u8);
 			}
 			upstreams.push(Upstream {
 				name: upconf.name.clone(),
@@ -55,7 +58,7 @@ impl Diverge {
 		let query_header = query.header();
 
 		let mut header = Header::response_from_request(query_header);
-		let mut answers = Vec::new();
+		let mut answers = None;
 
 		if query_header.message_type() != MessageType::Query {
 			debug!("expected query, got {}", query_header.message_type());
@@ -82,9 +85,10 @@ impl Diverge {
 			return mk_msg(header, Some(q), answers);
 		}
 
-		// to do: handle edns
+		// to do: handle edns (RFC 6891)
 
-		// not _really_ sure if it's supported but we don't have access to header flags from hickory
+		// not _really_ sure if it's supported, but let's assume it is
+		// also we don't have access to response header flags from hickory::lookup
 		if query_header.recursion_desired() {
 			header.set_recursion_available(true);
 		}
@@ -94,28 +98,34 @@ impl Diverge {
 				RecordType::A => {
 					let name = q.name().to_string();
 					info!("A {}", name);
-					answers = self.query_ip(name, RecordType::A).await;
+					answers = Some(self.query_ip(name, RecordType::A).await);
 				}
 				RecordType::AAAA => {
 					let name = q.name().to_string();
 					info!("AAAA {}", name);
-					answers = self.query_ip(name, RecordType::AAAA).await;
+					answers = Some(self.query_ip(name, RecordType::AAAA).await);
 				}
 				RecordType::PTR => {
-					let n = q.name().to_string();
-					info!("PTR {}", n);
-					// to do
+					if let Some(a) = parse_ptr_verbose(&q.name().to_ascii()) {
+						info!("PTR {}", a);
+						answers = self.query_ptr(a).await;
+					} else {
+						header.set_response_code(ResponseCode::FormErr);
+					}
 				}
 				_ => {
-					debug!("unsupported query type: {:?}", q.query_type());
+					warn!("unsupported query type: {:?}", q.query_type());
 					header.set_response_code(ResponseCode::NotImp);
 				}
 			},
 			DNSClass::CH => {
 				// to do: diagnostic
+				info!("CHAOS {} {}", q.query_type(), q.name());
+				header.set_response_code(ResponseCode::NotImp);
 			}
 			_ => {
-				debug!("unsupported class: {:?}", q.query_type());
+				warn!("unsupported class: {:?}", q.query_type());
+				header.set_response_code(ResponseCode::NotImp);
 			}
 		}
 		mk_msg(header, Some(q), answers)
@@ -133,11 +143,13 @@ impl Diverge {
 				);
 				return ret;
 			}
-			let resolver = &upstream.resolver;
-			info!("domain map choose upstream {} for {}", &upstream.name, &name);
-			let resp = resolver.lookup(&name, rtype).await;
+			info!(
+				"domain map choose upstream {} for {}",
+				&upstream.name, &name
+			);
+			let resp = upstream.resolver.lookup(&name, rtype).await;
 			if let Ok(resp) = resp {
-				let c = self.prune(&mut ret, resp.records(), i as u8);
+				let c = self.prune(&mut ret, resp.records(), i);
 				if c == 0 {
 					warn!(
 						"domain map choose upstream {} for {}, but all records are pruned",
@@ -146,7 +158,10 @@ impl Diverge {
 					ret.clear();
 				}
 			} else {
-				trace!("upstream {} failed to resolve {}: {:?}", &upstream.name, &name, resp);
+				warn!(
+					"upstream {} failed to resolve {}: {:?}",
+					&upstream.name, &name, resp
+				);
 			}
 		} else {
 			let mut tasks = Vec::new();
@@ -155,7 +170,7 @@ impl Diverge {
 				if upstream.disable_aaaa && rtype == RecordType::AAAA {
 					continue;
 				}
-				let resolver = (&upstream.resolver).clone();
+				let resolver = upstream.resolver.clone();
 				let name = name.clone();
 				tasks.push((
 					i,
@@ -174,7 +189,7 @@ impl Diverge {
 						ret.clear();
 					}
 				} else {
-					trace!("upstream {} failed to resolve {}: {:?}", uname, &name, resp);
+					warn!("upstream {} failed to resolve {}: {:?}", uname, &name, resp);
 				}
 			}
 		}
@@ -189,7 +204,7 @@ impl Diverge {
 				let a = r.data().unwrap().as_a().unwrap().0;
 				if self.ip_map.get_v4(&a) == v {
 					trace!("kept A {}", a);
-					ret.push(r.clone());
+					ret.push(r.to_owned());
 					c += 1;
 				} else {
 					trace!("prune A {}", a);
@@ -198,29 +213,115 @@ impl Diverge {
 				let a = r.data().unwrap().as_aaaa().unwrap().0;
 				if self.ip_map.get_v6(&a) == v {
 					trace!("keep AAAA {}", a);
-					ret.push(r.clone());
+					ret.push(r.to_owned());
 					c += 1;
 				} else {
 					trace!("prune AAAA {}", a);
 				}
 			} else {
-				ret.push(r.clone());
+				ret.push(r.to_owned());
 			}
 		}
 		c
 	}
+
+	async fn query_ptr(&self, q: IpAddr) -> Option<Vec<Record>> {
+		let i = self.ip_map.get(&q);
+		let upstream = &self.upstreams[i as usize];
+		info!("ip map choose upstream {} for {}", upstream.name, q);
+		let resp = upstream.resolver.reverse_lookup(q).await;
+		if let Ok(resp) = resp {
+			Some(
+				resp.as_lookup()
+					.records()
+					.iter()
+					.map(|r| r.to_owned())
+					.collect(),
+			)
+		} else {
+			trace!(
+				"upstream {} failed to resolve {}: {:?}",
+				upstream.name,
+				q,
+				resp
+			);
+			None
+		}
+	}
 }
 
-fn mk_msg(header: Header, q: Option<&Query>, answers: Vec<Record>) -> Option<Vec<u8>> {
+fn mk_msg(header: Header, q: Option<&Query>, answers: Option<Vec<Record>>) -> Option<Vec<u8>> {
 	let mut resp = Message::new();
 	resp.set_header(header);
 	if let Some(q) = q {
 		resp.add_query(q.to_owned());
 	}
-	resp.add_answers(answers);
-	// do I need to call this?
-	// resp.finalize(finalizer, inception_time)
+	if let Some(a) = answers {
+		resp.add_answers(a);
+	}
+	// it seems finalize() is not necessary
 	trace!("dns response: {}", resp);
 	// to do: truncate if exceed 0xffff
-	resp.to_vec().or_debug("failed to serialize dns response")
+	resp.to_vec().or_warn("failed to serialize dns response")
+}
+
+fn parse_ptr_verbose(q: &str) -> Option<IpAddr> {
+	match parse_ptr(q) {
+		Some(a) => Some(a),
+		None => {
+			warn!("invalid ptr name: {}", q);
+			None
+		}
+	}
+}
+
+fn parse_ptr(q: &str) -> Option<IpAddr> {
+	if let Some(q) = q.strip_suffix(".in-addr.arpa.") {
+		// v4
+		let octets: [u8; 4] = q
+			.split('.')
+			.rev()
+			.map(|s| s.parse())
+			.collect::<Result<Vec<u8>, _>>()
+			.ok()?
+			.try_into()
+			.ok()?;
+		Some(IpAddr::V4(Ipv4Addr::from(octets)))
+	} else if let Some(q) = q.strip_suffix(".ip6.arpa.") {
+		// v6, what a weired format...
+		let mut o: [u8; 32] = q
+			.split('.')
+			.rev()
+			.map(|o| u8::from_str_radix(o, 16))
+			.collect::<Result<Vec<u8>, _>>()
+			.ok()?
+			.try_into()
+			.ok()?;
+		for i in 0..16 {
+			o[i] = o[i * 2] << 4 | o[i * 2 + 1];
+		}
+		let o: [u8; 16] = o[0..16].try_into().unwrap();
+		Some(IpAddr::V6(Ipv6Addr::from(o)))
+	} else {
+		None
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_parse_ptr() {
+		assert_eq!(
+			parse_ptr_verbose("1.2.3.4.in-addr.arpa."),
+			Some(IpAddr::V4(Ipv4Addr::new(4, 3, 2, 1)))
+		);
+		assert_eq!(
+			parse_ptr_verbose(
+				"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa."
+			),
+			Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)))
+		);
+	}
 }

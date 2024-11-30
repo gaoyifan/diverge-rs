@@ -5,8 +5,28 @@ log setting for debug
 
 ideas
 ---
-* (dropped) multiple questions in a message
-	* to handle queries other than A/AAAA
+* queries other than A/AAA/PTR?
+	* send an A query too
+	* if the upstream supports pipelining, should not hurt response time
+	* do we really need this though
+* NXDOMAIN handling
+	* currently just returns a no error with no answer
+	* maybe we should trust NXDOMAIN from some upstream?
+* maybe ditch `hickory_resolver`
+	* the interface is now low enough
+		* we want to send/recv `hickory_proto::op::Message`
+* maybe ditch `hickory_proto` too
+	* interface is a bit clunky
+	* we might only need a (partial) deserialize
+		* to filter response
+		* not able to prune answers
+			* need more data/experiment on this
+* maybe optimize ipset using a bitmap like the go version
+
+dropped ideas
+---
+* multiple questions in a message
+	* to handle queries other than A/AAAA/PTR
 		* say if client request TXT, we'll send TXT __and__ A to upstream
 		* then use ip map to test if we should use this response
 	* or use an A list to handle AAAA request
