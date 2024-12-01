@@ -3,10 +3,11 @@ use std::{cell::RefCell, io::ErrorKind, net::SocketAddr, rc::Rc, time::Duration}
 use conf::DivergeConf;
 use log::*;
 use tokio::{
-	io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+	io::{AsyncReadExt, AsyncWriteExt, BufReader},
 	net::{TcpSocket, TcpStream},
 	select,
 	signal::ctrl_c,
+	sync::mpsc::{self, Sender},
 	task,
 	time::timeout,
 };
@@ -96,9 +97,18 @@ async fn handle_conn(
 	r_timeout: Duration,
 ) -> Option<()> {
 	let mut buf = [0u8; BUF_LEN];
-	let (r, w) = s.into_split();
+	let (r, mut w) = s.into_split();
+
+	// spawn a task to handle writing with a channel
+	let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1);
+	task::spawn_local(async move {
+		while let Some(msg) = rx.recv().await {
+			let _ = w.write_all(&msg).await.or_debug("tcp write error");
+		}
+	});
+
+	// read client requests
 	let mut r = BufReader::new(r);
-	let w = Rc::new(RefCell::new(w));
 	loop {
 		if *quit.borrow() {
 			debug!("tcp handle task quit");
@@ -125,18 +135,14 @@ async fn handle_conn(
 		// RFC 7766 6.2.1.1 pipelining
 		task::spawn_local(handle_q(
 			diverge.clone(),
-			w.clone(),
+			tx.clone(),
 			buf[0..len as usize].to_vec(),
 		));
 	}
 	Some(())
 }
 
-async fn handle_q<W: AsyncWrite + Unpin>(
-	diverge: Rc<Diverge>,
-	w: Rc<RefCell<W>>,
-	q: Vec<u8>,
-) -> Option<()> {
+async fn handle_q(diverge: Rc<Diverge>, w: Sender<Vec<u8>>, q: Vec<u8>) -> Option<()> {
 	let a = diverge.query(q).await.or_debug("diverge error")?;
 	if a.len() > 0xffff {
 		error!("answer too large: {}", a.len());
@@ -147,12 +153,7 @@ async fn handle_q<W: AsyncWrite + Unpin>(
 	buf.extend_from_slice(&(a.len() as u16).to_be_bytes()[..]);
 	buf.extend_from_slice(&a);
 
-	// clippy will warn about this, but it's intended
-	// we're using the current thread runtime, so this should be fine?
-	w.borrow_mut()
-		.write_all(&buf)
-		.await
-		.or_debug("tcp write error")?;
+	w.send(buf).await.or_debug("channel write error")?;
 	Some(())
 }
 

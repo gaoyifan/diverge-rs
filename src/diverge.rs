@@ -1,7 +1,4 @@
-use std::{
-	net::{IpAddr, Ipv4Addr, Ipv6Addr},
-	rc::Rc,
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use hickory_proto::{
 	op::{header::MessageType, Header, Message, Query, ResponseCode},
@@ -15,7 +12,7 @@ use crate::{conf::DivergeConf, domain_map::DomainMap, ip_map::IpMap, resolver, u
 
 struct Upstream {
 	name: String,
-	resolver: Rc<TokioAsyncResolver>,
+	resolver: TokioAsyncResolver,
 	disable_aaaa: bool,
 }
 
@@ -40,7 +37,7 @@ impl Diverge {
 			}
 			upstreams.push(Upstream {
 				name: upconf.name.clone(),
-				resolver: Rc::new(resolver::from(upconf)),
+				resolver: resolver::from(upconf),
 				disable_aaaa: upconf.disable_aaaa,
 			})
 		}
