@@ -26,21 +26,24 @@ impl Diverge {
 	pub fn from(conf: &DivergeConf) -> Self {
 		let mut domain_map = DomainMap::new();
 		let mut ip_map = IpMap::new((conf.upstreams.len() - 1) as u8);
-		let mut upstreams = Vec::new();
-		for i in 0..conf.upstreams.len() {
-			let upconf = &conf.upstreams[i];
-			for fname in upconf.domains.iter() {
-				domain_map.append_from_file(fname, i as u8);
-			}
-			for fname in upconf.ips.iter() {
-				ip_map.append_from_file(fname, i as u8);
-			}
-			upstreams.push(Upstream {
-				name: upconf.name.clone(),
-				resolver: resolver::from(upconf),
-				disable_aaaa: upconf.disable_aaaa,
+		let upstreams: Vec<_> = conf
+			.upstreams
+			.iter()
+			.enumerate()
+			.map(|(i, upconf)| {
+				for fname in upconf.domains.iter() {
+					domain_map.append_from_file(fname, i as u8);
+				}
+				for fname in upconf.ips.iter() {
+					ip_map.append_from_file(fname, i as u8);
+				}
+				Upstream {
+					name: upconf.name.clone(),
+					resolver: resolver::from(upconf),
+					disable_aaaa: upconf.disable_aaaa,
+				}
 			})
-		}
+			.collect();
 		Self {
 			domain_map,
 			ip_map,

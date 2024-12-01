@@ -13,7 +13,7 @@ ideas
 	* currently just returns a no error with no answer
 	* maybe we should trust NXDOMAIN from some upstream?
 * maybe ditch `hickory_resolver`
-	* the interface is now low enough
+	* the interface is not low enough
 		* we want to send/recv `hickory_proto::op::Message`
 * maybe ditch `hickory_proto` too
 	* interface is a bit clunky

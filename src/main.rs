@@ -1,13 +1,13 @@
-use std::{cell::RefCell, io::ErrorKind, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::Cell, io::ErrorKind, net::SocketAddr, rc::Rc, time::Duration};
 
 use conf::DivergeConf;
 use log::*;
 use tokio::{
-	io::{AsyncReadExt, AsyncWriteExt, BufReader},
+	io::{AsyncReadExt, AsyncWriteExt},
 	net::{TcpSocket, TcpStream},
 	select,
 	signal::ctrl_c,
-	sync::mpsc::{self, Sender},
+	sync::mpsc,
 	task,
 	time::timeout,
 };
@@ -20,7 +20,7 @@ mod resolver;
 mod utils;
 
 use diverge::Diverge;
-use utils::OrEx;
+use utils::{align_to, OrEx};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -51,7 +51,7 @@ async fn main() {
 // the real main running in a local set
 async fn main_ls(listen: SocketAddr, diverge: Diverge) -> Option<()> {
 	let diverge = Rc::new(diverge);
-	let quit = Rc::new(RefCell::new(false));
+	let quit = Rc::new(Cell::new(false));
 
 	let s = match listen {
 		SocketAddr::V4(_) => TcpSocket::new_v4().unwrap(),
@@ -79,38 +79,44 @@ async fn main_ls(listen: SocketAddr, diverge: Diverge) -> Option<()> {
 			}
 			_ = ctrl_c() => {
 				info!("ctrl-c received, exiting");
-				*quit.borrow_mut() = true;
 				break;
 			}
 		}
 	}
+	quit.set(true);
 	Some(())
 }
-
-const BUF_LEN: usize = 0x10000;
 
 async fn handle_conn(
 	diverge: Rc<Diverge>,
 	s: TcpStream,
-	quit: Rc<RefCell<bool>>,
+	quit: Rc<Cell<bool>>,
 	d_timeout: Duration,
 	r_timeout: Duration,
 ) -> Option<()> {
-	let mut buf = [0u8; BUF_LEN];
-	let (r, mut w) = s.into_split();
+	let (mut r, mut w) = s.into_split();
 
 	// spawn a task to handle writing with a channel
 	let (tx, mut rx) = mpsc::channel::<Vec<u8>>(1);
 	task::spawn_local(async move {
+		// RFC 7766 8 says we SHOULD pass them in a single write
+		let mut buf = Vec::with_capacity(0x1000);
 		while let Some(msg) = rx.recv().await {
+			buf.truncate(0);
+			if msg.len() > u16::MAX as usize {
+				error!("message too large: {}", msg.len());
+				continue;
+			}
+			buf.extend_from_slice(&(msg.len() as u16).to_be_bytes()[..]);
+			buf.extend_from_slice(&msg);
 			let _ = w.write_all(&msg).await.or_debug("tcp write error");
 		}
 	});
 
 	// read client requests
-	let mut r = BufReader::new(r);
+	let mut buf = vec![0u8; 0x1000];
 	loop {
-		if *quit.borrow() {
+		if quit.get() {
 			debug!("tcp handle task quit");
 			break;
 		}
@@ -128,32 +134,23 @@ async fn handle_conn(
 				return None;
 			}
 		};
+		if buf.len() < len as usize {
+			buf.resize(align_to(len as usize, 0x1000), 0);
+		}
 		let _ = timeout(r_timeout, r.read_exact(&mut buf[0..len as usize]))
 			.await
 			.or_debug("tcp timeout while reading dns message")?
 			.or_debug("tcp error while reading dns message")?;
 		// RFC 7766 6.2.1.1 pipelining
-		task::spawn_local(handle_q(
-			diverge.clone(),
-			tx.clone(),
-			buf[0..len as usize].to_vec(),
-		));
+		let diverge = diverge.clone();
+		let tx = tx.clone();
+		let buf = buf[0..len as usize].to_vec();
+		task::spawn_local(async move {
+			if let Some(a) = diverge.query(buf).await.or_debug("diverge error") {
+				tx.send(a).await.or_debug("channel write error");
+			}
+		});
 	}
-	Some(())
-}
-
-async fn handle_q(diverge: Rc<Diverge>, w: Sender<Vec<u8>>, q: Vec<u8>) -> Option<()> {
-	let a = diverge.query(q).await.or_debug("diverge error")?;
-	if a.len() > 0xffff {
-		error!("answer too large: {}", a.len());
-		return None;
-	}
-	// RFC 7766 8
-	let mut buf = Vec::with_capacity(2 + a.len());
-	buf.extend_from_slice(&(a.len() as u16).to_be_bytes()[..]);
-	buf.extend_from_slice(&a);
-
-	w.send(buf).await.or_debug("channel write error")?;
 	Some(())
 }
 
