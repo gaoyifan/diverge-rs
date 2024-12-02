@@ -104,8 +104,10 @@ async fn handle_conn(
 			}
 			buf.extend_from_slice(&(msg.len() as u16).to_be_bytes()[..]);
 			buf.extend_from_slice(&msg);
-			let _ = w.write_all(&msg).await.or_debug("tcp write error");
+			let _ = w.write_all(&buf).await.or_debug("tcp write error");
+			trace!("client write task wrote {} bytes", buf.len());
 		}
+		trace!("client write task ended")
 	});
 
 	// read client requests
