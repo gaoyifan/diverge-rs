@@ -3,7 +3,11 @@ log setting for debug
 ---
 `RUST_LOG=trace,rustls=info`
 
-ideas
+to do
+---
+* log partial prune to file, for science
+
+thoughts
 ---
 * queries other than A/AAA/PTR?
 	* send an A query too
@@ -23,7 +27,7 @@ ideas
 			* need more data/experiment on this
 * maybe optimize ipset using a bitmap like the go version
 
-dropped ideas
+dropped
 ---
 * multiple questions in a message
 	* to handle queries other than A/AAAA/PTR

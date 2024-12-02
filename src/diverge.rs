@@ -149,20 +149,20 @@ impl Diverge {
 				&upstream.name, &name
 			);
 			let resp = upstream.resolver.lookup(&name, rtype).await;
-			if let Ok(resp) = resp {
-				let c = self.prune(&mut ret, resp.records(), i);
-				if c == 0 {
-					warn!(
-						"domain map choose upstream {} for {}, but all records are pruned",
-						upstream.name, &name
-					);
-					ret.clear();
+			match resp {
+				Ok(resp) => {
+					let c = self.prune(&mut ret, resp.records(), i);
+					if c == 0 {
+						warn!(
+							"domain map choose upstream {} for {}, but all records are pruned",
+							upstream.name, &name
+						);
+						ret.clear();
+					}
 				}
-			} else {
-				warn!(
-					"upstream {} failed to resolve {}: {:?}",
-					&upstream.name, &name, resp
-				);
+				Err(e) => {
+					log_resolve_error(&upstream.name, &name, e);
+				}
 			}
 		} else {
 			let mut tasks = Vec::new();
@@ -181,16 +181,25 @@ impl Diverge {
 			for (i, task) in tasks.into_iter() {
 				let resp = task.await;
 				let uname = &self.upstreams[i].name;
-				if let Ok(Ok(resp)) = resp {
-					let c = self.prune(&mut ret, resp.records(), i as u8);
-					if c > 0 {
-						info!("ip map choose upstream {} for {}", uname, &name);
-						break;
-					} else {
-						ret.clear();
+				match resp {
+					Ok(Ok(resp)) => {
+						let c = self.prune(&mut ret, resp.records(), i as u8);
+						if c > 0 {
+							info!("ip map choose upstream {} for {}", uname, &name);
+							break;
+						} else {
+							ret.clear();
+						}
 					}
-				} else {
-					warn!("upstream {} failed to resolve {}: {:?}", uname, &name, resp);
+					Ok(Err(e)) => {
+						log_resolve_error(uname, &name, e);
+					}
+					Err(e) => {
+						warn!(
+							"failed to join task (resolve {} via {}): {:?}",
+							name, uname, e
+						);
+					}
 				}
 			}
 		}
@@ -305,6 +314,25 @@ fn parse_ptr(q: &str) -> Option<IpAddr> {
 		Some(IpAddr::V6(Ipv6Addr::from(o)))
 	} else {
 		None
+	}
+}
+
+use hickory_resolver::error::{ResolveError, ResolveErrorKind};
+
+fn log_resolve_error(upname: &str, name: &str, err: ResolveError) {
+	match err.kind() {
+		ResolveErrorKind::NoRecordsFound { query, .. } => {
+			warn!(
+				"upstream {}: {} {} {} no records found",
+				upname,
+				name,
+				query.query_class(),
+				query.query_type(),
+			);
+		}
+		_ => {
+			warn!("upstream {} failed to resolve {}: {:?}", upname, name, err);
+		}
 	}
 }
 
