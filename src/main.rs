@@ -62,7 +62,7 @@ async fn main_ls(listen: SocketAddr, diverge: Diverge) -> Option<()> {
 		select! {
 			d = d.accept() => {
 				let (socket, addr) = d.or_debug("tcp accept error")?;
-				info!("new connection from {}", addr);
+				debug!("new connection from {}", addr);
 				let _ = task::spawn_local(handle_conn(
 					diverge.clone(),
 					socket,
@@ -123,7 +123,7 @@ async fn handle_conn(
 		{
 			Ok(len) => len,
 			Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
-				info!("tcp eof, client closed");
+				debug!("tcp eof, client closed");
 				break;
 			}
 			Err(e) => {
