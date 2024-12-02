@@ -37,6 +37,7 @@ impl Diverge {
 				for fname in upconf.ips.iter() {
 					ip_map.append_from_file(fname, i as u8);
 				}
+				info!("upstream {} configured", &upconf.name);
 				Upstream {
 					name: upconf.name.clone(),
 					resolver: resolver::from(upconf),
@@ -133,7 +134,7 @@ impl Diverge {
 
 	// handles A/AAAA
 	async fn query_ip(&self, name: String, rtype: RecordType) -> Vec<Record> {
-		let mut ret = Vec::with_capacity(0x20);
+		let mut ret = Vec::with_capacity(0x10);
 		if let Some(i) = self.domain_map.get(&name) {
 			let upstream = &self.upstreams[i as usize];
 			if upstream.disable_aaaa && rtype == RecordType::AAAA {

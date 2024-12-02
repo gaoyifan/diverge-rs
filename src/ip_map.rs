@@ -21,10 +21,12 @@ impl<T: Copy> IpMap<T> {
 	}
 
 	pub fn append_from_file(&mut self, filename: &str, value: T) {
-		self.append_from_str(&std::fs::read_to_string(filename).unwrap(), value);
+		let c = self.append_from_str(&std::fs::read_to_string(filename).unwrap(), value);
+		info!("loaded {} entries from {}", c, filename);
 	}
 
-	pub fn append_from_str(&mut self, list: &str, value: T) {
+	pub fn append_from_str(&mut self, list: &str, value: T) -> usize {
+		let mut c = 0;
 		for line in list.lines() {
 			let line = line.trim();
 			if line.is_empty() || line.starts_with('#') {
@@ -34,7 +36,9 @@ impl<T: Copy> IpMap<T> {
 			let addr: IpAddr = addr.parse().unwrap();
 			let len: usize = len.parse().unwrap();
 			self.insert(&addr, len, value);
+			c += 1;
 		}
+		c
 	}
 
 	pub fn insert(&mut self, addr: &IpAddr, cidr_len: usize, value: T) {

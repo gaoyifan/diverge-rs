@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use log::*;
+
 pub struct DomainMap<T>(HashMap<String, T>);
 
 impl<T: Copy> DomainMap<T> {
@@ -12,17 +14,21 @@ impl<T: Copy> DomainMap<T> {
 	}
 
 	pub fn append_from_file(&mut self, filename: &str, v: T) {
-		self.append_from_str(&std::fs::read_to_string(filename).unwrap(), v);
+		let c = self.append_from_str(&std::fs::read_to_string(filename).unwrap(), v);
+		info!("loaded {} entries from {}", c, filename);
 	}
 
-	pub fn append_from_str(&mut self, list: &str, v: T) {
+	pub fn append_from_str(&mut self, list: &str, v: T) -> usize {
+		let mut c = 0;
 		for line in list.lines() {
 			let line = line.trim_ascii();
 			if line.is_empty() || line.starts_with('#') {
 				continue;
 			}
 			self.insert(line, v);
+			c += 1;
 		}
+		c
 	}
 
 	pub fn get(&self, mut k: &str) -> Option<T> {

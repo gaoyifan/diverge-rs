@@ -26,13 +26,8 @@ use utils::{align_to, OrEx};
 async fn main() {
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-	#[cfg(debug_assertions)]
-	let default_conf = "tests/test.conf".to_string();
-	#[cfg(not(debug_assertions))]
-	let default_conf = "diverge.conf".to_string();
-
 	let conf_fn = if std::env::args().len() < 2 {
-		default_conf
+		"diverge.conf".to_string()
 	} else {
 		std::env::args().nth(1).unwrap()
 	};
