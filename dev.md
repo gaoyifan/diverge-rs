@@ -25,7 +25,7 @@ thoughts
 		* to filter response
 		* not able to prune answers
 			* need more data/experiment on this
-* optimize ip/domain map with fst
+* optimize domain map with trie
 
 dropped
 ---

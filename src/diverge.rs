@@ -8,7 +8,7 @@ use hickory_resolver::TokioAsyncResolver;
 use log::*;
 use tokio::task;
 
-use crate::{conf::DivergeConf, domain_map::DomainMap, ip_map::IpMap, resolver, utils::OrEx};
+use crate::{conf::DivergeConf, domain_map::DomainMap, ip_map::IpMap, resolver};
 
 struct Upstream {
 	name: String,
@@ -54,7 +54,9 @@ impl Diverge {
 
 	pub async fn query(&self, q: Vec<u8>) -> Option<Vec<u8>> {
 		// seriously, why not just let user send it as is and let the resolver do the work?
-		let query = Message::from_vec(&q).or_debug("invalid dns message")?;
+		let query = Message::from_vec(&q)
+			.map_err(|e| error!("invalid dns message: {}", e))
+			.ok()?;
 		trace!("dns query: {}", query);
 		let query_header = query.header();
 
@@ -114,14 +116,11 @@ impl Diverge {
 						header.set_response_code(ResponseCode::FormErr);
 					}
 				}
-				RecordType::HTTPS => {
-					let name = q.name();
-					info!("HTTPS {}", name);
-					answers = self.query_other(name, RecordType::HTTPS).await;
-				}
 				_ => {
-					warn!("unsupported query type: {} {}", q.query_type(), q.name());
-					header.set_response_code(ResponseCode::NotImp);
+					let qtype = q.query_type();
+					let name = q.name();
+					info!("{} {}", qtype, name);
+					answers = self.query_other(name, qtype).await;
 				}
 			},
 			DNSClass::CH => {
@@ -144,7 +143,7 @@ impl Diverge {
 			let upstream = &self.upstreams[i as usize];
 			if upstream.disable_aaaa && rtype == RecordType::AAAA {
 				warn!(
-					"domain map choose upstream {} for {}, but AAAA is disabled",
+					"domain map choose upstream {} for {} but AAAA is disabled",
 					upstream.name, name
 				);
 				return ret;
@@ -156,7 +155,7 @@ impl Diverge {
 					let c = self.prune(&mut ret, resp.records(), i);
 					if c == 0 {
 						warn!(
-							"domain map choose upstream {} for {}, but all records are pruned",
+							"domain map choose upstream {} for {} but all records are pruned",
 							upstream.name, &name
 						);
 						ret.clear();
@@ -216,7 +215,7 @@ impl Diverge {
 			match (r.dns_class(), r.record_type()) {
 				(DNSClass::IN, RecordType::A) => {
 					let a = r.data().unwrap().as_a().unwrap().0;
-					if self.ip_map.get_v4(&a) == v {
+					if self.ip_map.get4(a) == v {
 						trace!("keep A {}", a);
 						ret.push(r.to_owned());
 						c += 1;
@@ -226,7 +225,7 @@ impl Diverge {
 				}
 				(DNSClass::IN, RecordType::AAAA) => {
 					let a = r.data().unwrap().as_aaaa().unwrap().0;
-					if self.ip_map.get_v6(&a) == v {
+					if self.ip_map.get6(a) == v {
 						trace!("keep AAAA {}", a);
 						ret.push(r.to_owned());
 						c += 1;
@@ -244,18 +243,12 @@ impl Diverge {
 	}
 
 	async fn query_ptr(&self, q: IpAddr) -> Option<Vec<Record>> {
-		let i = self.ip_map.get(&q);
+		let i = self.ip_map.get(q);
 		let upstream = &self.upstreams[i as usize];
 		info!("ip map choose upstream {} for {} PTR", upstream.name, q);
 		let resp = upstream.resolver.reverse_lookup(q).await;
 		match resp {
-			Ok(resp) => Some(
-				resp.as_lookup()
-					.records()
-					.iter()
-					.map(|r| r.to_owned())
-					.collect(),
-			),
+			Ok(resp) => Some(resp.as_lookup().records().to_vec()),
 			Err(err) => {
 				log_resolve_error(&upstream.name, q, err);
 				None
@@ -283,7 +276,7 @@ impl Diverge {
 		// interesting, hickory_proto::rr::Name does not satisfy hickory_resolver::IntoName
 		let resp = upstream.resolver.lookup(q.to_ascii(), rtype).await;
 		match resp {
-			Ok(resp) => Some(resp.records().iter().map(|r| r.to_owned()).collect()),
+			Ok(resp) => Some(resp.records().to_vec()),
 			Err(err) => {
 				log_resolve_error(&upstream.name, q, err);
 				None
@@ -304,17 +297,17 @@ fn mk_msg(header: Header, q: Option<&Query>, answers: Option<Vec<Record>>) -> Op
 	// it seems finalize() is not necessary
 	trace!("dns response: {}", resp);
 	// to do: truncate if exceed 0xffff
-	resp.to_vec().or_warn("failed to serialize dns response")
+	resp.to_vec()
+		.map_err(|e| error!("dns response encode error: {}", e))
+		.ok()
 }
 
 fn parse_ptr_verbose(q: &str) -> Option<IpAddr> {
-	match parse_ptr(q) {
-		Some(a) => Some(a),
-		None => {
-			warn!("invalid ptr name: {}", q);
-			None
-		}
+	let ptr = parse_ptr(q);
+	if ptr.is_none() {
+		warn!("invalid PTR query: {}", q);
 	}
+	ptr
 }
 
 fn parse_ptr(q: &str) -> Option<IpAddr> {
@@ -356,8 +349,8 @@ fn log_resolve_error<N: std::fmt::Display>(upname: &str, name: N, err: ResolveEr
 		ResolveErrorKind::NoRecordsFound { query, .. } => {
 			let qtype = query.query_type();
 			let level = match qtype {
-				RecordType::AAAA => log::Level::Info,
-				_ => log::Level::Warn,
+				RecordType::A => log::Level::Warn,
+				_ => log::Level::Info,
 			};
 			log!(
 				level,

@@ -20,7 +20,7 @@ mod resolver;
 mod utils;
 
 use diverge::Diverge;
-use utils::{align_to, OrEx};
+use utils::align_to;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -61,7 +61,7 @@ async fn main_ls(listen: SocketAddr, diverge: Diverge) -> Option<()> {
 	loop {
 		select! {
 			d = d.accept() => {
-				let (socket, addr) = d.or_debug("tcp accept error")?;
+				let (socket, addr) = d.map_err(|e| error!("tcp accept error: {}", e)).ok()?;
 				debug!("new connection from {}", addr);
 				let _ = task::spawn_local(handle_conn(
 					diverge.clone(),
@@ -104,8 +104,10 @@ async fn handle_conn(
 			}
 			buf.extend_from_slice(&(msg.len() as u16).to_be_bytes()[..]);
 			buf.extend_from_slice(&msg);
-			let _ = w.write_all(&buf).await.or_debug("tcp write error");
-			trace!("client write task wrote {} bytes", buf.len());
+			match w.write_all(&buf).await {
+				Ok(_) => trace!("client write task wrote {} bytes", buf.len()),
+				Err(e) => trace!("client write task write error: {}", e),
+			}
 		}
 		trace!("client write task ended")
 	});
@@ -117,16 +119,17 @@ async fn handle_conn(
 			debug!("tcp handle task quit");
 			break;
 		}
-		let len = match timeout(d_timeout, r.read_u16())
-			.await
-			.or_info("tcp timeout while waiting client request, connection closed")?
-		{
-			Ok(len) => len,
-			Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
+		let len = match timeout(d_timeout, r.read_u16()).await {
+			Ok(Ok(len)) => len,
+			Err(_) => {
+				info!("tcp timeout while waiting client request, connection closed");
+				break;
+			}
+			Ok(Err(e)) if e.kind() == ErrorKind::UnexpectedEof => {
 				debug!("tcp eof, client closed");
 				break;
 			}
-			Err(e) => {
+			Ok(Err(e)) => {
 				warn!("tcp error while waiting client request: {}", e);
 				return None;
 			}
@@ -134,17 +137,27 @@ async fn handle_conn(
 		if buf.len() < len as usize {
 			buf.resize(align_to(len as usize, 0x1000), 0);
 		}
-		let _ = timeout(r_timeout, r.read_exact(&mut buf[0..len as usize]))
-			.await
-			.or_debug("tcp timeout while reading dns message")?
-			.or_debug("tcp error while reading dns message")?;
+		match timeout(r_timeout, r.read_exact(&mut buf[0..len as usize])).await {
+			Err(_) => {
+				debug!("tcp timeout while reading dns request");
+				break;
+			}
+			Ok(Err(e)) => {
+				debug!("tcp error while reading dns request: {}", e);
+			}
+			Ok(Ok(_)) => {}
+		}
 		// RFC 7766 6.2.1.1 pipelining
 		let diverge = diverge.clone();
 		let tx = tx.clone();
 		let buf = buf[0..len as usize].to_vec();
 		task::spawn_local(async move {
-			if let Some(a) = diverge.query(buf).await.or_debug("diverge error") {
-				tx.send(a).await.or_debug("channel write error");
+			if let Some(a) = diverge.query(buf).await {
+				if tx.send(a).await.is_err() {
+					debug!("channel write error");
+				}
+			} else {
+				debug!("diverge error");
 			}
 		});
 	}
