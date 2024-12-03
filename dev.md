@@ -27,6 +27,15 @@ thoughts
 			* need more data/experiment on this
 * optimize domain map with trie
 
+notes
+---
+* listening on TCP was a mistake
+	* the original idea was no need to deal with TC and retry on TCP
+	* AdGuardHome won't even keep the connection open
+		* and I was implementing pipelining
+		* response time is horrible
+	* also appearantly dnsmasq will just seize up on TCP
+
 dropped
 ---
 * multiple questions in a message

@@ -45,29 +45,28 @@ diagnostics (not implemented yet)
 ---
 via the CHAOS class, example using dig or nslookup:
 * test domain list:
-	* `dig +tcp -p 1054 @127.0.0.1 -c chaos -t txt www.example.com`
-	* `nslookup -vc -port=1054 -class=chaos -type=txt www.example.com 127.0.0.1`
+	* `dig -p 1054 @127.0.0.1 -c chaos -t txt www.example.com`
+	* `nslookup -port=1054 -class=chaos -type=txt www.example.com 127.0.0.1`
 		* be aware, nslookup on Windows ignores `-port=` (always 53),
 		but diverge typically doesn't listen on 53 (likely occupied by AdGuardHome).
 * test IP set/list:
-	* `dig +tcp -p 1054 @127.0.0.1 -c chaos -x 1.1.1.1`
-	* `nslookup -vc -port=1054 -class=chaos -type=ptr 1.1.1.1 127.0.0.1`
+	* `dig -p 1054 @127.0.0.1 -c chaos -x 1.1.1.1`
+	* `nslookup -port=1054 -class=chaos -type=ptr 1.1.1.1 127.0.0.1`
 
 more
 ---
 * diverge intend to be an upstream for AdGuardHome,
 so certain features are omitted:
 	* no cache.
-	* listens on TCP only.
 * this is a port of [a previous project](https://github.com/Jimmy-Z/diverge) to Rust,
 some features are different/dropped:
 	* AAAA is IP set based too, instead of based on A decision.
 	* other query types fallbacks to upstream A if no hit in domain map.
 		* instead of based on A decision.
 	* (dropped) decision cache (with redis dependency).
-	* (dropped) listen on UDP.
 
 to do
 ---
+* edns
 * sane log level
 * CHAOS
