@@ -125,7 +125,7 @@ impl UpstreamSec {
 	fn new(name: &str) -> Self {
 		Self {
 			name: name.to_string(),
-			protocol: Protocol::Tcp,
+			protocol: Protocol::Udp,
 			addrs: Vec::new(),
 			port: None,
 			ips: Vec::new(),
@@ -154,6 +154,7 @@ impl Section for UpstreamSec {
 					.collect();
 			}
 			"protocol" => match v.to_ascii_lowercase().as_str() {
+				"udp" => self.protocol = Protocol::Udp,
 				"tcp" => self.protocol = Protocol::Tcp,
 				"tls" => self.protocol = Protocol::Tls,
 				_ => panic!("unsupported protocol: {}", v),

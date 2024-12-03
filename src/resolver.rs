@@ -9,6 +9,7 @@ use crate::conf::UpstreamSec;
 
 fn default_port(protocol: Protocol) -> u16 {
 	match protocol {
+		Protocol::Udp => 53,
 		Protocol::Tcp => 53,
 		Protocol::Tls => 853,
 		_ => panic!("unsupported protocol: {}", protocol),
@@ -50,15 +51,11 @@ pub fn from(conf: &UpstreamSec) -> TokioAsyncResolver {
 
 #[cfg(test)]
 mod tests {
-	use hickory_proto::rr::RecordType;
-
-// use hickory_proto::rr::RecordType;
 	use super::*;
+	use hickory_proto::rr::RecordType;
 
 	#[tokio::test]
 	async fn test() {
-		// let r = TokioAsyncResolver::tokio(ResolverConfig::cloudflare_tls(), ResolverOpts::default());
-		// let r = TokioAsyncResolver::tokio(ResolverConfig::google_tls(), ResolverOpts::default());
 		let r = from(&UpstreamSec {
 			name: "".to_string(),
 			protocol: Protocol::Tls,
@@ -73,7 +70,4 @@ mod tests {
 			println!("{:?}", a);
 		}
 	}
-
-	#[tokio::test]
-	async fn test2() {}
 }

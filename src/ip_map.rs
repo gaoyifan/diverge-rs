@@ -5,8 +5,8 @@ use std::{
 	path::Path,
 };
 
-use ip_network_table_deps_treebitmap::IpLookupTable;
 use log::*;
+use treebitmap::IpLookupTable;
 
 pub struct IpMap<T> {
 	v4: IpLookupTable<Ipv4Addr, T>,
