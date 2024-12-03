@@ -9,7 +9,7 @@ to do
 
 thoughts
 ---
-* queries other than A/AAA/PTR?
+* better handling for queries other than A/AAA/PTR?
 	* send an A query too
 	* if the upstream supports pipelining, should not hurt response time
 	* do we really need this though
@@ -25,7 +25,7 @@ thoughts
 		* to filter response
 		* not able to prune answers
 			* need more data/experiment on this
-* maybe optimize ipset using a bitmap like the go version
+* optimize ip/domain map with fst
 
 dropped
 ---

@@ -2,7 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use hickory_proto::{
 	op::{header::MessageType, Header, Message, Query, ResponseCode},
-	rr::{DNSClass, Record, RecordType},
+	rr::{DNSClass, Name, Record, RecordType},
 };
 use hickory_resolver::TokioAsyncResolver;
 use log::*;
@@ -97,12 +97,12 @@ impl Diverge {
 		match q.query_class() {
 			DNSClass::IN => match q.query_type() {
 				RecordType::A => {
-					let name = q.name().to_string();
+					let name = q.name();
 					info!("A {}", name);
 					answers = Some(self.query_ip(name, RecordType::A).await);
 				}
 				RecordType::AAAA => {
-					let name = q.name().to_string();
+					let name = q.name();
 					info!("AAAA {}", name);
 					answers = Some(self.query_ip(name, RecordType::AAAA).await);
 				}
@@ -114,8 +114,13 @@ impl Diverge {
 						header.set_response_code(ResponseCode::FormErr);
 					}
 				}
+				RecordType::HTTPS => {
+					let name = q.name();
+					info!("HTTPS {}", name);
+					answers = self.query_other(name, RecordType::HTTPS).await;
+				}
 				_ => {
-					warn!("unsupported query type: {:?}", q.query_type());
+					warn!("unsupported query type: {} {}", q.query_type(), q.name());
 					header.set_response_code(ResponseCode::NotImp);
 				}
 			},
@@ -125,7 +130,7 @@ impl Diverge {
 				header.set_response_code(ResponseCode::NotImp);
 			}
 			_ => {
-				warn!("unsupported class: {:?}", q.query_type());
+				warn!("unsupported class: {}", q.query_type());
 				header.set_response_code(ResponseCode::NotImp);
 			}
 		}
@@ -133,22 +138,19 @@ impl Diverge {
 	}
 
 	// handles A/AAAA
-	async fn query_ip(&self, name: String, rtype: RecordType) -> Vec<Record> {
+	async fn query_ip(&self, name: &Name, rtype: RecordType) -> Vec<Record> {
 		let mut ret = Vec::with_capacity(0x10);
-		if let Some(i) = self.domain_map.get(&name) {
+		if let Some(i) = self.domain_map.get(&name.to_utf8()) {
 			let upstream = &self.upstreams[i as usize];
 			if upstream.disable_aaaa && rtype == RecordType::AAAA {
 				warn!(
 					"domain map choose upstream {} for {}, but AAAA is disabled",
-					upstream.name, &name
+					upstream.name, name
 				);
 				return ret;
 			}
-			info!(
-				"domain map choose upstream {} for {}",
-				&upstream.name, &name
-			);
-			let resp = upstream.resolver.lookup(&name, rtype).await;
+			info!("domain map choose upstream {} for {}", &upstream.name, name);
+			let resp = upstream.resolver.lookup(&name.to_ascii(), rtype).await;
 			match resp {
 				Ok(resp) => {
 					let c = self.prune(&mut ret, resp.records(), i);
@@ -161,11 +163,12 @@ impl Diverge {
 					}
 				}
 				Err(e) => {
-					log_resolve_error(&upstream.name, &name, e);
+					log_resolve_error(&upstream.name, name, e);
 				}
 			}
 		} else {
 			let mut tasks = Vec::new();
+			let name = name.to_ascii();
 			for i in 0..self.upstreams.len() {
 				let upstream = &self.upstreams[i];
 				if upstream.disable_aaaa && rtype == RecordType::AAAA {
@@ -210,26 +213,31 @@ impl Diverge {
 	fn prune(&self, ret: &mut Vec<Record>, records: &[Record], v: u8) -> usize {
 		let mut c = 0;
 		for r in records {
-			if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::A {
-				let a = r.data().unwrap().as_a().unwrap().0;
-				if self.ip_map.get_v4(&a) == v {
-					trace!("kept A {}", a);
-					ret.push(r.to_owned());
-					c += 1;
-				} else {
-					trace!("prune A {}", a);
+			match (r.dns_class(), r.record_type()) {
+				(DNSClass::IN, RecordType::A) => {
+					let a = r.data().unwrap().as_a().unwrap().0;
+					if self.ip_map.get_v4(&a) == v {
+						trace!("keep A {}", a);
+						ret.push(r.to_owned());
+						c += 1;
+					} else {
+						trace!("prune A {}", a);
+					}
 				}
-			} else if r.dns_class() == DNSClass::IN && r.record_type() == RecordType::AAAA {
-				let a = r.data().unwrap().as_aaaa().unwrap().0;
-				if self.ip_map.get_v6(&a) == v {
-					trace!("keep AAAA {}", a);
-					ret.push(r.to_owned());
-					c += 1;
-				} else {
-					trace!("prune AAAA {}", a);
+				(DNSClass::IN, RecordType::AAAA) => {
+					let a = r.data().unwrap().as_aaaa().unwrap().0;
+					if self.ip_map.get_v6(&a) == v {
+						trace!("keep AAAA {}", a);
+						ret.push(r.to_owned());
+						c += 1;
+					} else {
+						trace!("prune AAAA {}", a);
+					}
 				}
-			} else {
-				ret.push(r.to_owned());
+				_ => {
+					trace!("skip {} record", r.record_type());
+					ret.push(r.to_owned());
+				}
 			}
 		}
 		c
@@ -238,24 +246,48 @@ impl Diverge {
 	async fn query_ptr(&self, q: IpAddr) -> Option<Vec<Record>> {
 		let i = self.ip_map.get(&q);
 		let upstream = &self.upstreams[i as usize];
-		info!("ip map choose upstream {} for {}", upstream.name, q);
+		info!("ip map choose upstream {} for {} PTR", upstream.name, q);
 		let resp = upstream.resolver.reverse_lookup(q).await;
-		if let Ok(resp) = resp {
-			Some(
+		match resp {
+			Ok(resp) => Some(
 				resp.as_lookup()
 					.records()
 					.iter()
 					.map(|r| r.to_owned())
 					.collect(),
-			)
-		} else {
-			trace!(
-				"upstream {} failed to resolve {}: {:?}",
-				upstream.name,
-				q,
-				resp
-			);
-			None
+			),
+			Err(err) => {
+				log_resolve_error(&upstream.name, q, err);
+				None
+			}
+		}
+	}
+
+	async fn query_other(&self, q: &Name, rtype: RecordType) -> Option<Vec<Record>> {
+		let upstream = match self.domain_map.get(&q.to_utf8()) {
+			Some(i) => {
+				let u = &self.upstreams[i as usize];
+				info!("domain map choose upstream {} for {} {}", &u.name, q, rtype);
+				u
+			}
+			None => {
+				let u = &self.upstreams[0];
+				info!(
+					"domain map miss, fallback to upstream {} for {} {}",
+					&u.name, q, rtype
+				);
+				u
+			}
+		};
+		// CAUTION: hickory warned this interface may change in the future
+		// interesting, hickory_proto::rr::Name does not satisfy hickory_resolver::IntoName
+		let resp = upstream.resolver.lookup(q.to_ascii(), rtype).await;
+		match resp {
+			Ok(resp) => Some(resp.records().iter().map(|r| r.to_owned()).collect()),
+			Err(err) => {
+				log_resolve_error(&upstream.name, q, err);
+				None
+			}
 		}
 	}
 }
@@ -319,15 +351,20 @@ fn parse_ptr(q: &str) -> Option<IpAddr> {
 
 use hickory_resolver::error::{ResolveError, ResolveErrorKind};
 
-fn log_resolve_error(upname: &str, name: &str, err: ResolveError) {
+fn log_resolve_error<N: std::fmt::Display>(upname: &str, name: N, err: ResolveError) {
 	match err.kind() {
 		ResolveErrorKind::NoRecordsFound { query, .. } => {
-			warn!(
-				"upstream {}: {} {} {} no records found",
+			let qtype = query.query_type();
+			let level = match qtype {
+				RecordType::AAAA => log::Level::Info,
+				_ => log::Level::Warn,
+			};
+			log!(
+				level,
+				"upstream {}: {} - no {} records found",
 				upname,
 				name,
-				query.query_class(),
-				query.query_type(),
+				qtype,
 			);
 		}
 		_ => {

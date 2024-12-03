@@ -41,7 +41,7 @@ and only some of them are in `ipA`, others will be pruned.
 	* this is meant to prevent DNS leakage.
 		* like you don't want `dnsA` to see you're accessing some websites via `X`.
 
-diagnostics (planned)
+diagnostics (not implemented yet)
 ---
 via the CHAOS class, example using dig or nslookup:
 * test domain list:
@@ -62,8 +62,10 @@ so certain features are omitted:
 * this is a port of [a previous project](https://github.com/Jimmy-Z/diverge) to Rust,
 some features are different/dropped:
 	* AAAA is IP set based too, instead of based on A decision.
+	* HTTPS fallbacks to upstream A if no hit in domain map.
+		* instead of based on A decision.
+	* (dropped) QTYPE other than A/AAAA/PTR/HTTPS.
 	* (dropped) decision cache (with redis dependency).
-	* (dropped) QTYPE other than A/AAAA/PTR.
 	* (dropped) listen on UDP.
 
 to do
