@@ -12,6 +12,7 @@ fn default_port(protocol: Protocol) -> u16 {
 		Protocol::Udp => 53,
 		Protocol::Tcp => 53,
 		Protocol::Tls => 853,
+		Protocol::Https => 443,
 		_ => panic!("unsupported protocol: {}", protocol),
 	}
 }
@@ -19,15 +20,18 @@ fn default_port(protocol: Protocol) -> u16 {
 pub fn from(conf: &UpstreamSec) -> TokioAsyncResolver {
 	let mut config = ResolverConfig::new();
 	let port = conf.port.unwrap_or(default_port(conf.protocol));
+	let tls_dns_name = if conf.tls_dns_name.is_none()
+		&& (conf.protocol == Protocol::Tls || conf.protocol == Protocol::Https)
+	{
+		Some(conf.addrs[0].to_string())
+	} else {
+		conf.tls_dns_name.clone()
+	};
 	for addr in &conf.addrs {
 		config.add_name_server(NameServerConfig {
 			socket_addr: SocketAddr::new(*addr, port),
 			protocol: conf.protocol,
-			tls_dns_name: if conf.protocol == Protocol::Tls {
-				Some(addr.to_string())
-			} else {
-				None
-			},
+			tls_dns_name: tls_dns_name.clone(),
 			trust_negative_responses: conf.protocol == Protocol::Tls,
 			tls_config: None,
 			bind_addr: None,
@@ -40,7 +44,7 @@ pub fn from(conf: &UpstreamSec) -> TokioAsyncResolver {
 	// default 2
 	// opts.attempts = 2;
 	// default 32
-	// opts.cache_size = 32;
+	opts.cache_size = 0;
 	// default true
 	opts.use_hosts_file = false;
 	// default 2
@@ -60,9 +64,10 @@ mod tests {
 	async fn test() {
 		let r = from(&UpstreamSec {
 			name: "".to_string(),
-			protocol: Protocol::Tls,
+			protocol: Protocol::Https,
 			addrs: vec!["1.1.1.1".parse().unwrap()],
 			port: None,
+			tls_dns_name: Some("cloudflare-dns.com".to_string()),
 			ips: vec![],
 			domains: vec![],
 			disable_aaaa: false,

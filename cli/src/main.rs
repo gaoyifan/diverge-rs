@@ -1,4 +1,8 @@
-use std::str::FromStr;
+use std::{
+	net::SocketAddr,
+	str::FromStr,
+	time::{Duration, Instant},
+};
 
 use clap::{Parser, Subcommand};
 use log::*;
@@ -8,7 +12,7 @@ use hickory_resolver::{
 	config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
 	TokioAsyncResolver,
 };
-use tokio::{net::UdpSocket, select, signal::ctrl_c};
+use tokio::{net::UdpSocket, select, signal::ctrl_c, time::sleep};
 
 #[derive(Parser)]
 struct Args {
@@ -113,29 +117,66 @@ async fn proxy(listen: &str, origin: &str) {
 }
 
 async fn query(server: &str, name: &str, qtype: &str, _qclass: &str) {
-	let r = resolver(server);
+	let r = resolver(server, Protocol::Https);
 
-	let resp = r
-		.lookup(name, RecordType::from_str(qtype).unwrap())
-		.await
-		.unwrap();
-	for a in resp {
-		println!("{:?}", a);
+	let mut i = 0;
+	loop {
+		let t0 = Instant::now();
+		let resp = r
+			.lookup(name, RecordType::from_str(qtype).unwrap())
+			.await
+			.unwrap();
+		let cost = t0.elapsed().as_secs_f32();
+		info!("lookup {} {} cost {:.3}ms", name, qtype, cost * 1000.0);
+		for a in resp {
+			println!("{:?}", a);
+		}
+		if i == 4 {
+			break;
+		}
+		i += 1;
+		sleep(Duration::from_millis(250)).await;
 	}
 }
 
-pub fn resolver(addr: &str) -> TokioAsyncResolver {
+pub fn resolver(addr: &str, proto: Protocol) -> TokioAsyncResolver {
 	let mut conf = ResolverConfig::new();
-	conf.add_name_server(NameServerConfig {
-		socket_addr: addr.parse().unwrap(),
-		protocol: Protocol::Udp,
-		tls_dns_name: None,
-		trust_negative_responses: false,
-		tls_config: None,
-		bind_addr: None,
-	});
+	match proto {
+		Protocol::Udp => {
+			conf.add_name_server(NameServerConfig {
+				socket_addr: SocketAddr::new(addr.parse().unwrap(), 53),
+				protocol: Protocol::Udp,
+				tls_dns_name: None,
+				trust_negative_responses: false,
+				tls_config: None,
+				bind_addr: None,
+			});
+		}
+		Protocol::Tls => {
+			conf.add_name_server(NameServerConfig {
+				socket_addr: SocketAddr::new(addr.parse().unwrap(), 853),
+				protocol: Protocol::Tls,
+				tls_dns_name: Some(addr.to_string()),
+				trust_negative_responses: true,
+				tls_config: None,
+				bind_addr: None,
+			});
+		}
+		Protocol::Https => {
+			conf.add_name_server(NameServerConfig {
+				socket_addr: SocketAddr::new(addr.parse().unwrap(), 443),
+				protocol: Protocol::Https,
+				tls_dns_name: Some(addr.to_string()),
+				trust_negative_responses: true,
+				tls_config: None,
+				bind_addr: None,
+			});
+		}
+		_ => panic!("unsupported protocol: {}", proto),
+	}
 	let mut opts = ResolverOpts::default();
 	opts.use_hosts_file = false;
 	opts.edns0 = true;
+	opts.cache_size = 0;
 	TokioAsyncResolver::tokio(conf, opts)
 }

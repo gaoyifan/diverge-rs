@@ -116,6 +116,7 @@ pub struct UpstreamSec {
 	pub protocol: Protocol,
 	pub addrs: Vec<IpAddr>,
 	pub port: Option<u16>,
+	pub tls_dns_name: Option<String>,
 	pub ips: Vec<String>,
 	pub domains: Vec<String>,
 	pub disable_aaaa: bool,
@@ -128,6 +129,7 @@ impl UpstreamSec {
 			protocol: Protocol::Udp,
 			addrs: Vec::new(),
 			port: None,
+			tls_dns_name: None,
 			ips: Vec::new(),
 			domains: Vec::new(),
 			disable_aaaa: false,
@@ -157,12 +159,14 @@ impl Section for UpstreamSec {
 				"udp" => self.protocol = Protocol::Udp,
 				"tcp" => self.protocol = Protocol::Tcp,
 				"tls" => self.protocol = Protocol::Tls,
+				"https" => self.protocol = Protocol::Https,
 				_ => panic!("unsupported protocol: {}", v),
 			},
 			"port" => match v.parse() {
 				Ok(v) => self.port = Some(v),
 				Err(e) => panic!("invalid port {}: {}", v, e),
 			},
+			"tls_dns_name" => self.tls_dns_name = Some(v.to_string()),
 			"ips" => self.ips = v.split_ascii_whitespace().map(|s| s.to_string()).collect(),
 			"domains" => self.domains = v.split_ascii_whitespace().map(|s| s.to_string()).collect(),
 			"disable_aaaa" => self.disable_aaaa = v.parse().unwrap(),
@@ -183,7 +187,7 @@ mod tests {
 			.try_init()
 			.unwrap();
 		// read "example.conf" into a string
-		let conf = std::fs::read_to_string("example.conf").unwrap();
+		let conf = std::fs::read_to_string("../example.conf").unwrap();
 		let dc: DivergeConf = conf.parse().unwrap();
 		println!("{:?}", dc);
 	}
