@@ -1,30 +1,6 @@
-[package]
-name = "diverge"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-log = { version = "*", features = ["release_max_level_info"] }
-env_logger = "*"
-
-treebitmap = { package = "ip_network_table-deps-treebitmap", version = "*" }
-tokio = { version = "1", features = [
-	"net",
-	"rt",
-	"macros",
-	"signal",
-	"time",
-	"sync",
-] }
-hickory-proto = { version = "*", default-features = false }
-hickory-resolver = { version = "*", default-features = false, features = [
-	"tokio-runtime",
-	"dns-over-rustls",
-	"native-certs",
-] }
-
-[dev-dependencies]
-rand = "*"
+[workspace]
+members = ["diverge", "cli"]
+resolver = "2"
 
 [profile.release]
 lto = true

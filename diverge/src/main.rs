@@ -1,15 +1,7 @@
 use log::*;
 use tokio::task;
 
-mod conf;
-mod diverge;
-mod domain_map;
-mod ip_map;
-mod resolver;
-mod udpd;
-
-use conf::DivergeConf;
-use diverge::Diverge;
+use diverge::{conf::DivergeConf, diverge::Diverge, udpd::udpd};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -28,9 +20,7 @@ async fn main() {
 	let diverge = Diverge::from(&conf);
 
 	let local = task::LocalSet::new();
-	local
-		.run_until(udpd::udpd(conf.global.listen, diverge))
-		.await;
+	local.run_until(udpd(conf.global.listen, diverge)).await;
 	local.await;
 }
 

@@ -11,8 +11,7 @@ thoughts
 ---
 * better handling for queries other than A/AAA/PTR?
 	* send an A query too
-	* if the upstream supports pipelining, should not hurt response time
-	* do we really need this though
+	* do we really need this though?
 * NXDOMAIN handling
 	* currently just returns a no error with no answer
 	* maybe we should trust NXDOMAIN from some upstream?
@@ -25,16 +24,20 @@ thoughts
 		* to filter response
 		* not able to prune answers
 			* need more data/experiment on this
-* optimize domain map with trie
+* optimize domain map with trie?
 
 notes
 ---
-* listening on TCP was a mistake
+* listening on TCP was a mistake, back to UDP now
 	* the original idea was no need to deal with TC and retry on TCP
 	* AdGuardHome won't even keep the connection open
 		* and I was implementing pipelining
 		* response time is horrible
 	* also appearantly dnsmasq will just seize up on TCP
+* edns(0) is set now
+	* not ideal, since it's a per server/upstream setting, not per query
+		* a limitation of hickory_resolver
+	* should be fine?
 
 dropped
 ---

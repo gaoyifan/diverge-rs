@@ -36,15 +36,17 @@ pub fn from(conf: &UpstreamSec) -> TokioAsyncResolver {
 
 	let mut opts = ResolverOpts::default();
 	// default 5 seconds
-	opts.timeout = std::time::Duration::from_secs(5);
+	// opts.timeout = std::time::Duration::from_secs(5);
 	// default 2
-	opts.attempts = 2;
+	// opts.attempts = 2;
 	// default 32
-	opts.cache_size = 32;
+	// opts.cache_size = 32;
 	// default true
 	opts.use_hosts_file = false;
 	// default 2
-	opts.num_concurrent_reqs = 2;
+	// opts.num_concurrent_reqs = 2;
+	// default false
+	opts.edns0 = true;
 
 	TokioAsyncResolver::tokio(config, opts)
 }

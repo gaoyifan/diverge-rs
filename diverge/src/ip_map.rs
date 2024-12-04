@@ -1,12 +1,8 @@
-use std::{
-	fs::File,
-	io::{BufRead, BufReader},
-	net::{IpAddr, Ipv4Addr, Ipv6Addr},
-	path::Path,
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use log::*;
 use treebitmap::IpLookupTable;
+
+use crate::from_lst::FromLst;
 
 pub struct IpMap<T> {
 	v4: IpLookupTable<Ipv4Addr, T>,
@@ -21,48 +17,6 @@ impl<T: Copy> IpMap<T> {
 			v6: IpLookupTable::new(),
 			default,
 		}
-	}
-
-	pub fn append_from_file<P: AsRef<Path>>(&mut self, file: P, value: T) {
-		let f = match File::open(file.as_ref()) {
-			Ok(f) => f,
-			Err(e) => {
-				warn!("failed to open file: {:?}", e);
-				return;
-			}
-		};
-		let c = self.append_from(BufReader::new(f).lines().map_while(Result::ok), value);
-		info!("loaded {} entries from {}", c, file.as_ref().display());
-	}
-
-	pub fn append_from<L, S>(&mut self, lst: L, value: T) -> usize
-	where
-		L: Iterator<Item = S>,
-		S: AsRef<str>,
-	{
-		let mut c = 0;
-		for l in lst {
-			let l = l.as_ref();
-			let l = l.trim();
-			if l.is_empty() || l.starts_with('#') {
-				continue;
-			}
-			// use a closure so we can enjoy ? for a while
-			let (addr, len) = match |l: &str| -> Option<(IpAddr, u32)> {
-				let (a, b) = l.split_once('/')?;
-				Some((a.parse().ok()?, b.parse().ok()?))
-			}(l)
-			{
-				Some(l) => l,
-				None => {
-					warn!("invalid line: {}", l);
-					continue;
-				}
-			};
-			self.insert(addr, len, value);
-			c += 1;
-		}
-		c
 	}
 
 	pub fn insert(&mut self, addr: IpAddr, cidr_len: u32, value: T) {
@@ -89,6 +43,14 @@ impl<T: Copy> IpMap<T> {
 			IpAddr::V4(addr) => self.get4(addr),
 			IpAddr::V6(addr) => self.get6(addr),
 		}
+	}
+}
+
+impl<T: Copy> FromLst<T> for IpMap<T> {
+	fn append_line(&mut self, l: &str, v: T) -> Option<()> {
+		let (addr, len) = l.split_once('/')?;
+		self.insert(addr.parse().ok()?, len.parse().ok()?, v);
+		Some(())
 	}
 }
 

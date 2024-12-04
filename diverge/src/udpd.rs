@@ -24,10 +24,10 @@ pub async fn udpd(listen: SocketAddr, diverge: Diverge) {
 						task::spawn_local(async move {
 							if let Some(a) = diverge.query(buf).await {
 								if let Err(e) = w.send_to(&a, addr).await {
-									debug!("udp send error: {}", e);
+									error!("udp send error: {}", e);
 								}
 							} else {
-								debug!("diverge error");
+								error!("diverge error");
 							}
 						});
 					}

@@ -8,7 +8,7 @@ use hickory_resolver::TokioAsyncResolver;
 use log::*;
 use tokio::task;
 
-use crate::{conf::DivergeConf, domain_map::DomainMap, ip_map::IpMap, resolver};
+use crate::{conf::DivergeConf, domain_map::DomainMap, from_lst::FromLst, ip_map::IpMap, resolver};
 
 struct Upstream {
 	name: String,
@@ -142,7 +142,7 @@ impl Diverge {
 		if let Some(i) = self.domain_map.get(&name.to_utf8()) {
 			let upstream = &self.upstreams[i as usize];
 			if upstream.disable_aaaa && rtype == RecordType::AAAA {
-				warn!(
+				info!(
 					"domain map choose upstream {} for {} but AAAA is disabled",
 					upstream.name, name
 				);

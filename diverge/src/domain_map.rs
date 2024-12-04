@@ -1,34 +1,17 @@
 use std::collections::HashMap;
 
-use log::*;
+use crate::from_lst::FromLst;
 
 pub struct DomainMap<T>(HashMap<String, T>);
 
 impl<T: Copy> DomainMap<T> {
+	#[allow(clippy::new_without_default)]
 	pub fn new() -> Self {
 		Self(HashMap::new())
 	}
 
 	pub fn insert(&mut self, k: &str, v: T) {
 		self.0.insert(k.to_string(), v);
-	}
-
-	pub fn append_from_file(&mut self, filename: &str, v: T) {
-		let c = self.append_from_str(&std::fs::read_to_string(filename).unwrap(), v);
-		info!("loaded {} entries from {}", c, filename);
-	}
-
-	pub fn append_from_str(&mut self, list: &str, v: T) -> usize {
-		let mut c = 0;
-		for line in list.lines() {
-			let line = line.trim_ascii();
-			if line.is_empty() || line.starts_with('#') {
-				continue;
-			}
-			self.insert(line, v);
-			c += 1;
-		}
-		c
 	}
 
 	pub fn get(&self, mut k: &str) -> Option<T> {
@@ -45,6 +28,13 @@ impl<T: Copy> DomainMap<T> {
 				None => return None,
 			}
 		}
+	}
+}
+
+impl<T: Copy> FromLst<T> for DomainMap<T> {
+	fn append_line(&mut self, l: &str, v: T) -> Option<()> {
+		self.insert(l, v);
+		Some(())
 	}
 }
 
