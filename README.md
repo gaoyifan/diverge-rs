@@ -7,39 +7,39 @@ chooses results based on IP set/list.
 what is this for?
 ---
 * typical situation:
-	* we have 2 links to the internet `A` and `X`.
-		* typically `A` is physical from ISP, `X` is a VPN.
-		* `A` only provides reliable connection to IP set/list `ipA`
-		* `X` provides reliable connection to the rest, but less performant or unreliable on `ipA`.
-	* we route set `ipA` via `A` and the rest via `X`.
-	* each link provides it's own DNS resolver `dnsA` and `dnsX`.
-* when you access a website which resolves to an address out of `ipA`,
-using result from `dnsA` will (likely) be (geographically or otherwise) suboptimal.
+	* we have 2 links to the internet `0` and `X`.
+		* typically `0` is physical from ISP, `X` is a VPN.
+		* `0` only provides reliable connection to IP set/list `ip0`
+		* `X` provides reliable connection to the rest, but less performant or unreliable on `ip0`.
+	* we route set `ip0` via `0` and the rest via `X`.
+	* each link provides it's own DNS resolver `dns0` and `dnsX`.
+* when you access a website which resolves to an address out of `ip0`,
+using result from `dns0` will (likely) be (geographically or otherwise) suboptimal.
 	* and vice-versa.
 * diverge's solution:
-	* if the response from `dnsA` is in `ipA`, use it.
+	* if the response from `dns0` is in `ip0`, use it.
 	* otherwise, use `dnsX`.
 
 details
 ---
 * several measures to reduce response time:
 	* queries were sent concurrently.
-	* decisions were made when `dnsA` responded,
+	* decisions were made when `dns0` responded,
 	if the response qualify,
 	it was returned to the client immediately without waiting for `dnsX`.
 	* implemented RFC 7766 6.2.1.1 pipelining
-* if the response from `dnsA` contains multiple answers
-and only some of them are in `ipA`, others will be pruned.
-* more than 2 links are supported, like 3-way `A` `B` and `X`, or more.
-	* `A` and `B` would both have their corresponding `ipA`/`ipB` and `dnsA`/`dnsB`
+* if the response from `dns0` contains multiple answers
+and only some of them are in `ip0`, others will be pruned.
+* more than 2 links are supported, like 3-way `0` `1` and `X`, or more.
+	* `0` and `1` would both have their corresponding `ip0`/`ip1` and `dns0`/`dns1`
 * there's an option to disable AAAA per upstream.
 	* when link `X` doesn't support AAAA, but `dnsX` does.
-	* still filter/prune answers from `dnsA`.
+	* still filter/prune answers from `dns0`.
 		* will return no answer if all answers were pruned,
 			which should be fine since clients should fallback to IPv4.
 * also supports domain lists, and it takes precedence.
 	* this is meant to prevent DNS leakage.
-		* like you don't want `dnsA` to see you're accessing some websites via `X`.
+		* like you don't want `dns0` to see you're accessing some websites via `X`.
 
 diagnostics (not implemented yet)
 ---
@@ -60,13 +60,13 @@ so certain features are omitted:
 	* no cache.
 * this is a port of [a previous project](https://github.com/Jimmy-Z/diverge) to Rust,
 some features are different/dropped:
+	* supports DoT/DoH upstreams.
 	* AAAA is IP set based too, instead of based on A decision.
-	* other query types fallbacks to upstream A if no hit in domain map.
+	* other query types fallbacks to upstream 0 if no hit in domain map.
 		* instead of based on A decision.
 	* (dropped) decision cache (with redis dependency).
 
 to do
 ---
-* edns
 * sane log level
 * CHAOS

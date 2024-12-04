@@ -13,6 +13,7 @@ fn default_port(protocol: Protocol) -> u16 {
 		Protocol::Tcp => 53,
 		Protocol::Tls => 853,
 		Protocol::Https => 443,
+		Protocol::H3 => 443,
 		_ => panic!("unsupported protocol: {}", protocol),
 	}
 }
@@ -21,7 +22,9 @@ pub fn from(conf: &UpstreamSec) -> TokioAsyncResolver {
 	let mut config = ResolverConfig::new();
 	let port = conf.port.unwrap_or(default_port(conf.protocol));
 	let tls_dns_name = if conf.tls_dns_name.is_none()
-		&& (conf.protocol == Protocol::Tls || conf.protocol == Protocol::Https)
+		&& (conf.protocol == Protocol::Tls
+			|| conf.protocol == Protocol::Https
+			|| conf.protocol == Protocol::H3)
 	{
 		Some(conf.addrs[0].to_string())
 	} else {

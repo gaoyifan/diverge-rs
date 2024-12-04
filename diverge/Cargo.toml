@@ -21,6 +21,7 @@ hickory-resolver = { version = "*", default-features = false, features = [
 	"tokio-runtime",
 	"dns-over-rustls",
 	"dns-over-https-rustls",
+	"dns-over-h3",
 	"native-certs",
 ] }
 

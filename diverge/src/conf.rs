@@ -155,13 +155,7 @@ impl Section for UpstreamSec {
 					})
 					.collect();
 			}
-			"protocol" => match v.to_ascii_lowercase().as_str() {
-				"udp" => self.protocol = Protocol::Udp,
-				"tcp" => self.protocol = Protocol::Tcp,
-				"tls" => self.protocol = Protocol::Tls,
-				"https" => self.protocol = Protocol::Https,
-				_ => panic!("unsupported protocol: {}", v),
-			},
+			"protocol" => self.protocol = parse_proto(v),
 			"port" => match v.parse() {
 				Ok(v) => self.port = Some(v),
 				Err(e) => panic!("invalid port {}: {}", v, e),
@@ -172,6 +166,17 @@ impl Section for UpstreamSec {
 			"disable_aaaa" => self.disable_aaaa = v.parse().unwrap(),
 			_ => warn!("unknown key: \"{}\"", k),
 		}
+	}
+}
+
+pub fn parse_proto(proto: &str) -> Protocol {
+	match proto.to_ascii_lowercase().as_str() {
+		"udp" => Protocol::Udp,
+		"tcp" => Protocol::Tcp,
+		"tls" => Protocol::Tls,
+		"https" => Protocol::Https,
+		"h3" => Protocol::H3,
+		_ => panic!("unsupported protocol: {}", proto),
 	}
 }
 

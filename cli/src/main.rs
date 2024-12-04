@@ -14,6 +14,8 @@ use hickory_resolver::{
 };
 use tokio::{net::UdpSocket, select, signal::ctrl_c, time::sleep};
 
+use diverge::{conf, resolver};
+
 #[derive(Parser)]
 struct Args {
 	#[command(subcommand)]
@@ -22,7 +24,16 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Cmd {
-	Q {
+	Query {
+		#[arg(short = 'o', long, default_value = "udp")]
+		proto: String,
+
+		#[arg(short, long)]
+		port: Option<u16>,
+
+		#[arg(short, long)]
+		tls_dns_name: Option<String>,
+
 		server: String,
 
 		name: String,
@@ -34,7 +45,7 @@ enum Cmd {
 		#[arg(default_value = "IN")]
 		qclass: String,
 	},
-	P {
+	Proxy {
 		listen: String,
 		origin: String,
 	},
@@ -47,15 +58,18 @@ async fn main() {
 	env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
 	match args.cmd {
-		Cmd::Q {
+		Cmd::Query {
+			proto,
+			port,
+			tls_dns_name,
 			server,
 			name,
 			qtype,
 			qclass,
 		} => {
-			query(&server, &name, &qtype, &qclass).await;
+			query(proto, port, tls_dns_name, server, name, qtype, qclass).await;
 		}
-		Cmd::P { listen, origin } => {
+		Cmd::Proxy { listen, origin } => {
 			proxy(&listen, &origin).await;
 		}
 	}
@@ -116,14 +130,31 @@ async fn proxy(listen: &str, origin: &str) {
 	}
 }
 
-async fn query(server: &str, name: &str, qtype: &str, _qclass: &str) {
-	let r = resolver(server, Protocol::Https);
+async fn query(
+	proto: String,
+	port: Option<u16>,
+	tls_dns_name: Option<String>,
+	server: String,
+	name: String,
+	qtype: String,
+	_qclass: String,
+) {
+	let r = resolver::from(&conf::UpstreamSec {
+		name: "".to_string(),
+		addrs: vec![server.parse().unwrap()],
+		protocol: conf::parse_proto(&proto),
+		port,
+		tls_dns_name,
+		disable_aaaa: false,
+		ips: vec![],
+		domains: vec![],
+	});
 
 	let mut i = 0;
 	loop {
 		let t0 = Instant::now();
 		let resp = r
-			.lookup(name, RecordType::from_str(qtype).unwrap())
+			.lookup(&name, RecordType::from_str(&qtype).unwrap())
 			.await
 			.unwrap();
 		let cost = t0.elapsed().as_secs_f32();
@@ -137,46 +168,4 @@ async fn query(server: &str, name: &str, qtype: &str, _qclass: &str) {
 		i += 1;
 		sleep(Duration::from_millis(250)).await;
 	}
-}
-
-pub fn resolver(addr: &str, proto: Protocol) -> TokioAsyncResolver {
-	let mut conf = ResolverConfig::new();
-	match proto {
-		Protocol::Udp => {
-			conf.add_name_server(NameServerConfig {
-				socket_addr: SocketAddr::new(addr.parse().unwrap(), 53),
-				protocol: Protocol::Udp,
-				tls_dns_name: None,
-				trust_negative_responses: false,
-				tls_config: None,
-				bind_addr: None,
-			});
-		}
-		Protocol::Tls => {
-			conf.add_name_server(NameServerConfig {
-				socket_addr: SocketAddr::new(addr.parse().unwrap(), 853),
-				protocol: Protocol::Tls,
-				tls_dns_name: Some(addr.to_string()),
-				trust_negative_responses: true,
-				tls_config: None,
-				bind_addr: None,
-			});
-		}
-		Protocol::Https => {
-			conf.add_name_server(NameServerConfig {
-				socket_addr: SocketAddr::new(addr.parse().unwrap(), 443),
-				protocol: Protocol::Https,
-				tls_dns_name: Some(addr.to_string()),
-				trust_negative_responses: true,
-				tls_config: None,
-				bind_addr: None,
-			});
-		}
-		_ => panic!("unsupported protocol: {}", proto),
-	}
-	let mut opts = ResolverOpts::default();
-	opts.use_hosts_file = false;
-	opts.edns0 = true;
-	opts.cache_size = 0;
-	TokioAsyncResolver::tokio(conf, opts)
 }
