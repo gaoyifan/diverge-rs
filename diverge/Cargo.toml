@@ -16,6 +16,14 @@ tokio = { version = "1", features = [
 	"time",
 	"sync",
 ] }
+bytes = "*"
+reqwest = { version = "*", default-features = false, features = [
+	"rustls-tls",
+	"rustls-tls-native-roots",
+	"http2",
+	# "http3",
+	"socks",
+] }
 hickory-proto = { version = "*", default-features = false }
 hickory-resolver = { version = "*", default-features = false, features = [
 	"tokio-runtime",
