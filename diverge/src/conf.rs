@@ -8,9 +8,11 @@
 
 #[cfg(debug_assertions)]
 use std::fmt::Debug;
-use std::str::FromStr;
+use std::path::Path;
 
 use log::warn;
+
+use crate::utils::read_lines;
 
 // this is the part that's generic
 
@@ -21,12 +23,12 @@ pub trait Section {
 pub trait Conf: Sized {
 	fn new() -> Self;
 	fn sec_mut(&mut self, name: &str) -> &mut dyn Section;
-	// I'd very much like to impl FromStr for Conf, but that's not allowed
-	fn from_str(conf: &str) -> Self {
+
+	fn from(conf: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
 		let mut ret = Self::new();
 		let mut sec = None;
-		for l in conf.lines() {
-			let l = l.trim_ascii();
+		for l in conf {
+			let l = l.as_ref().trim_ascii();
 			if l.is_empty() || l.starts_with('#') {
 				// empty line or comment
 			} else if l.starts_with("[") && l.ends_with("]") {
@@ -47,6 +49,10 @@ pub trait Conf: Sized {
 			}
 		}
 		ret
+	}
+
+	fn from_file(conf: impl AsRef<Path>) -> Option<Self> {
+		Some(Self::from(read_lines(conf)?))
 	}
 }
 
@@ -70,21 +76,13 @@ impl Conf for DivergeConf {
 		}
 	}
 	fn sec_mut(&mut self, name: &str) -> &mut dyn Section {
-		match name {
-			"global" => &mut self.global,
-			_ => {
-				self.upstreams.push(UpstreamSec::new(name));
-				let len = self.upstreams.len();
-				&mut self.upstreams[len - 1]
-			}
+		if name.to_ascii_lowercase().as_str() == "global" {
+			&mut self.global
+		} else {
+			self.upstreams.push(UpstreamSec::new(name));
+			let len = self.upstreams.len();
+			&mut self.upstreams[len - 1]
 		}
-	}
-}
-
-impl FromStr for DivergeConf {
-	type Err = ();
-	fn from_str(conf: &str) -> Result<Self, Self::Err> {
-		Ok(<Self as Conf>::from_str(conf))
 	}
 }
 
@@ -191,9 +189,7 @@ mod tests {
 			.filter_level(log::LevelFilter::Trace)
 			.try_init()
 			.unwrap();
-		// read "example.conf" into a string
-		let conf = std::fs::read_to_string("../example.conf").unwrap();
-		let dc: DivergeConf = conf.parse().unwrap();
+		let dc = DivergeConf::from_file("../example.conf").unwrap();
 		println!("{:?}", dc);
 	}
 }

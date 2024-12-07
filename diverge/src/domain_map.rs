@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::from_lst::FromLst;
+use crate::utils::FromLst;
 
 pub struct DomainMap<T>(HashMap<String, T>);
 

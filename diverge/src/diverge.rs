@@ -8,7 +8,7 @@ use hickory_resolver::TokioAsyncResolver;
 use log::*;
 use tokio::task;
 
-use crate::{conf::DivergeConf, domain_map::DomainMap, from_lst::FromLst, ip_map::IpMap, resolver};
+use crate::{conf::DivergeConf, domain_map::DomainMap, ip_map::IpMap, resolver, utils::FromLst};
 
 struct Upstream {
 	name: String,
