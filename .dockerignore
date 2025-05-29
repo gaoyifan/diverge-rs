@@ -1,0 +1,34 @@
+# Build artifacts
+target/
+**/target/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+*.md
+dev.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Configuration files that shouldn't be in container
+example.conf
+rustfmt.toml
+
+# Docker files
+Dockerfile
+.dockerignore 
