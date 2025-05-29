@@ -6,13 +6,13 @@ edition = "2021"
 [dependencies]
 diverge = { path = "../diverge" }
 
-log = { version = "*", features = ["release_max_level_info"] }
-env_logger = "*"
-clap = { version = "*", features = ["derive"] }
+log = { version = "0.4", features = ["release_max_level_info"] }
+env_logger = "0.11"
+clap = { version = "4.5", features = ["derive"] }
 
 tokio = { version = "1", features = ["net", "rt", "macros", "time", "signal"] }
-hickory-proto = { version = "*", default-features = false }
-hickory-resolver = { version = "*", default-features = false, features = [
+hickory-proto = { version = "0.24", default-features = false }
+hickory-resolver = { version = "0.24", default-features = false, features = [
 	"tokio-runtime",
 	"dns-over-rustls",
 	"dns-over-https-rustls",

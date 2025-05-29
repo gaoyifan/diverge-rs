@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-log = { version = "*", features = ["release_max_level_info"] }
-env_logger = "*"
+log = { version = "0.4", features = ["release_max_level_info"] }
+env_logger = "0.11"
 
-treebitmap = { package = "ip_network_table-deps-treebitmap", version = "*" }
+treebitmap = { package = "ip_network_table-deps-treebitmap", version = "0.5" }
 tokio = { version = "1", features = [
 	"net",
 	"rt",
@@ -16,16 +16,16 @@ tokio = { version = "1", features = [
 	"time",
 	"sync",
 ] }
-bytes = "*"
-reqwest = { version = "*", default-features = false, features = [
+bytes = "1"
+reqwest = { version = "0.12", default-features = false, features = [
 	"rustls-tls",
 	"rustls-tls-native-roots",
 	"http2",
 	# "http3",
 	"socks",
 ] }
-hickory-proto = { version = "*", default-features = false }
-hickory-resolver = { version = "*", default-features = false, features = [
+hickory-proto = { version = "0.24", default-features = false }
+hickory-resolver = { version = "0.24", default-features = false, features = [
 	"tokio-runtime",
 	"dns-over-rustls",
 	"dns-over-https-rustls",
@@ -34,4 +34,4 @@ hickory-resolver = { version = "*", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-rand = "*"
+rand = "0.9"
