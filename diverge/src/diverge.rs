@@ -155,10 +155,10 @@ impl Diverge {
 					let c = self.prune(&mut ret, resp.records(), i);
 					if c == 0 {
 						warn!(
-							"domain map choose upstream {} for {} but all records are pruned",
+							"domain map choose upstream {} for {} but all records are pruned; returning unfiltered records",
 							upstream.name, &name
 						);
-						ret.clear();
+						ret = resp.records().to_vec();
 					}
 				}
 				Err(e) => {
