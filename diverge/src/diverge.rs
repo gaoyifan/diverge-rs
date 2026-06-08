@@ -1,14 +1,17 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use futures::{stream::FuturesUnordered, StreamExt};
 use hickory_proto::{
 	op::{header::MessageType, Header, Message, Query, ResponseCode},
 	rr::{DNSClass, Name, Record, RecordType},
 };
-use hickory_resolver::TokioAsyncResolver;
+use hickory_resolver::{error::ResolveError, TokioAsyncResolver};
 use log::*;
-use tokio::task;
+use tokio::time::{timeout, Duration};
 
 use crate::{conf::DivergeConf, domain_map::DomainMap, ip_map::IpMap, resolver, utils::FromLst};
+
+const UPSTREAM_LOOKUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 struct Upstream {
 	name: String,
@@ -149,60 +152,89 @@ impl Diverge {
 				return ret;
 			}
 			info!("domain map choose upstream {} for {}", &upstream.name, name);
-			let resp = upstream.resolver.lookup(&name.to_ascii(), rtype).await;
-			match resp {
-				Ok(resp) => {
-					let c = self.prune(&mut ret, resp.records(), i);
+			match lookup_records(upstream.resolver.clone(), name.to_ascii(), rtype).await {
+				LookupOutcome::Records(records) => {
+					let c = self.prune(&mut ret, &records, i);
 					if c == 0 {
 						warn!(
 							"domain map choose upstream {} for {} but all records are pruned; returning unfiltered records",
 							upstream.name, &name
 						);
-						ret = resp.records().to_vec();
+						ret = records;
 					}
 				}
-				Err(e) => {
+				LookupOutcome::Error(e) => {
 					log_resolve_error(&upstream.name, name, e);
 				}
+				LookupOutcome::Timeout => log_resolve_timeout(&upstream.name, name, rtype),
+				LookupOutcome::Skipped => {}
 			}
 		} else {
-			let mut tasks = Vec::new();
 			let name = name.to_ascii();
-			for i in 0..self.upstreams.len() {
-				let upstream = &self.upstreams[i];
+			let mut outcomes = Vec::with_capacity(self.upstreams.len());
+			outcomes.resize_with(self.upstreams.len(), || None);
+			let mut tasks = FuturesUnordered::new();
+
+			for (i, upstream) in self.upstreams.iter().enumerate() {
 				if upstream.disable_aaaa && rtype == RecordType::AAAA {
+					outcomes[i] = Some(LookupOutcome::Skipped);
 					continue;
 				}
 				let resolver = upstream.resolver.clone();
 				let name = name.clone();
-				tasks.push((
-					i,
-					task::spawn_local(async move { resolver.lookup(&name, rtype).await }),
-				));
+				tasks.push(async move { (i, lookup_records(resolver, name, rtype).await) });
 			}
-			for (i, task) in tasks.into_iter() {
-				let resp = task.await;
-				let uname = &self.upstreams[i].name;
-				match resp {
-					Ok(Ok(resp)) => {
-						let c = self.prune(&mut ret, resp.records(), i as u8);
-						if c > 0 {
-							info!("ip map choose upstream {} for {}", uname, &name);
-							break;
-						} else {
+
+			let mut next = 0;
+			while let Some((i, outcome)) = tasks.next().await {
+				outcomes[i] = Some(outcome);
+
+				while next < outcomes.len() {
+					let Some(outcome) = outcomes[next].take() else {
+						break;
+					};
+					let uname = &self.upstreams[next].name;
+					match outcome {
+						LookupOutcome::Records(records) => {
+							let c = self.prune(&mut ret, &records, next as u8);
+							if c > 0 {
+								info!("ip map choose upstream {} for {}", uname, &name);
+								return ret;
+							}
 							ret.clear();
 						}
+						LookupOutcome::Error(e) => {
+							log_resolve_error(uname, &name, e);
+						}
+						LookupOutcome::Timeout => {
+							log_resolve_timeout(uname, &name, rtype);
+						}
+						LookupOutcome::Skipped => {}
 					}
-					Ok(Err(e)) => {
-						log_resolve_error(uname, &name, e);
-					}
-					Err(e) => {
-						warn!(
-							"failed to join task (resolve {} via {}): {:?}",
-							name, uname, e
-						);
-					}
+					next += 1;
 				}
+			}
+
+			while next < outcomes.len() {
+				if let Some(outcome) = outcomes[next].take() {
+					let uname = &self.upstreams[next].name;
+					match outcome {
+						LookupOutcome::Records(records) => {
+							let c = self.prune(&mut ret, &records, next as u8);
+							if c > 0 {
+								info!("ip map choose upstream {} for {}", uname, &name);
+								return ret;
+							}
+							ret.clear();
+						}
+						LookupOutcome::Error(e) => {
+							log_resolve_error(uname, &name, e);
+						}
+						LookupOutcome::Timeout => log_resolve_timeout(uname, &name, rtype),
+						LookupOutcome::Skipped => {}
+					};
+				}
+				next += 1;
 			}
 		}
 		ret
@@ -285,6 +317,25 @@ impl Diverge {
 	}
 }
 
+enum LookupOutcome {
+	Records(Vec<Record>),
+	Error(ResolveError),
+	Timeout,
+	Skipped,
+}
+
+async fn lookup_records(
+	resolver: TokioAsyncResolver,
+	name: String,
+	rtype: RecordType,
+) -> LookupOutcome {
+	match timeout(UPSTREAM_LOOKUP_TIMEOUT, resolver.lookup(name, rtype)).await {
+		Ok(Ok(resp)) => LookupOutcome::Records(resp.records().to_vec()),
+		Ok(Err(e)) => LookupOutcome::Error(e),
+		Err(_) => LookupOutcome::Timeout,
+	}
+}
+
 fn mk_msg(header: Header, q: Option<&Query>, answers: Option<Vec<Record>>) -> Option<Vec<u8>> {
 	let mut resp = Message::new();
 	resp.set_header(header);
@@ -342,7 +393,14 @@ fn parse_ptr(q: &str) -> Option<IpAddr> {
 	}
 }
 
-use hickory_resolver::error::{ResolveError, ResolveErrorKind};
+use hickory_resolver::error::ResolveErrorKind;
+
+fn log_resolve_timeout<N: std::fmt::Display>(upname: &str, name: N, rtype: RecordType) {
+	warn!(
+		"upstream {} timed out resolving {} {} after {:?}",
+		upname, name, rtype, UPSTREAM_LOOKUP_TIMEOUT
+	);
+}
 
 fn log_resolve_error<N: std::fmt::Display>(upname: &str, name: N, err: ResolveError) {
 	match err.kind() {
@@ -369,6 +427,10 @@ fn log_resolve_error<N: std::fmt::Display>(upname: &str, name: N, err: ResolveEr
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::conf::{DivergeConf, GlobalSec, UpstreamSec};
+	use hickory_proto::op::OpCode;
+	use hickory_resolver::config::Protocol;
+	use tokio::net::UdpSocket;
 
 	#[test]
 	fn test_parse_ptr() {
@@ -382,5 +444,96 @@ mod tests {
 			),
 			Some(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)))
 		);
+	}
+
+	#[tokio::test(flavor = "current_thread")]
+	async fn query_returns_when_later_upstream_hangs() {
+		let responsive = no_records_server().await;
+		let hanging = hanging_server().await;
+		let diverge = Diverge::from(&DivergeConf {
+			global: GlobalSec {
+				listen: "127.0.0.1:0".parse().unwrap(),
+			},
+			upstreams: vec![
+				UpstreamSec {
+					name: "CN".to_string(),
+					protocol: Protocol::Udp,
+					addrs: vec![responsive.ip()],
+					port: Some(responsive.port()),
+					tls_dns_name: None,
+					ips: vec![],
+					domains: vec![],
+					disable_aaaa: false,
+				},
+				UpstreamSec {
+					name: "X".to_string(),
+					protocol: Protocol::Udp,
+					addrs: vec![hanging.ip()],
+					port: Some(hanging.port()),
+					tls_dns_name: None,
+					ips: vec![],
+					domains: vec![],
+					disable_aaaa: false,
+				},
+			],
+		});
+
+		let query = query_message("api.github.com.", RecordType::AAAA);
+		let response = timeout(Duration::from_secs(5), diverge.query(query))
+			.await
+			.expect("diverge query should be bounded by upstream timeout")
+			.expect("valid query should produce a DNS response");
+		let response = Message::from_vec(&response).unwrap();
+
+		assert_eq!(response.response_code(), ResponseCode::NoError);
+		assert_eq!(response.answer_count(), 0);
+		assert_eq!(response.query_count(), 1);
+	}
+
+	fn query_message(name: &str, rtype: RecordType) -> Vec<u8> {
+		let mut query = Query::new();
+		query.set_name(Name::from_ascii(name).unwrap());
+		query.set_query_type(rtype);
+		query.set_query_class(DNSClass::IN);
+
+		let mut msg = Message::new();
+		msg.set_id(0x1234);
+		msg.set_message_type(MessageType::Query);
+		msg.set_op_code(OpCode::Query);
+		msg.set_recursion_desired(true);
+		msg.add_query(query);
+		msg.to_vec().unwrap()
+	}
+
+	async fn no_records_server() -> std::net::SocketAddr {
+		let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+		let addr = socket.local_addr().unwrap();
+		tokio::spawn(async move {
+			let mut buf = vec![0u8; 512];
+			while let Ok((len, peer)) = socket.recv_from(&mut buf).await {
+				let request = Message::from_vec(&buf[..len]).unwrap();
+				let mut response = Message::new();
+				response.set_header(Header::response_from_request(request.header()));
+				response.set_recursion_available(true);
+				for query in request.queries() {
+					response.add_query(query.clone());
+				}
+				socket
+					.send_to(&response.to_vec().unwrap(), peer)
+					.await
+					.unwrap();
+			}
+		});
+		addr
+	}
+
+	async fn hanging_server() -> std::net::SocketAddr {
+		let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+		let addr = socket.local_addr().unwrap();
+		tokio::spawn(async move {
+			let mut buf = vec![0u8; 512];
+			while socket.recv_from(&mut buf).await.is_ok() {}
+		});
+		addr
 	}
 }
